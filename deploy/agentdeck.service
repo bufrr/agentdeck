@@ -1,0 +1,19 @@
+[Unit]
+Description=AgentDeck web app
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bytenoob
+Group=bytenoob
+WorkingDirectory=/home/bytenoob/agentdeck
+Environment=NODE_ENV=production
+Environment=GTD_HOST=127.0.0.1
+Environment=GTD_PORT=8787
+ExecStart=/home/bytenoob/.nvm/versions/node/v22.18.0/bin/node --disable-warning=ExperimentalWarning /home/bytenoob/agentdeck/server.mjs
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
