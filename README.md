@@ -47,6 +47,8 @@ GTD_REQUIRE_AUTH=1
 GTD_BASIC_USER=bytenoob
 GTD_BASIC_PASSWORD_FILE=/absolute/path/to/data/basic-password
 GTD_ALLOW_PRIVATE_FETCH=0
+GTD_BACKUP_DIR=/absolute/path/to/data/backups
+GTD_BACKUP_KEEP=30
 ```
 
 ## Deployment
@@ -64,6 +66,35 @@ When `GTD_REQUIRE_AUTH=1` is enabled, the app uses HTTP Basic auth for all route
 Authenticated production smoke check:
 
 ```sh
+curl -fsS -u "bytenoob:$(cat /home/bytenoob/agentdeck/data/basic-password)" http://127.0.0.1:8787/api/state
+```
+
+## Backup And Restore
+
+Create a timestamped backup:
+
+```sh
+npm run backup
+```
+
+Backups default to `data/backups/agentdeck-YYYYMMDDTHHMMSSZ/` and include:
+
+- `gtd.sqlite` created with SQLite `VACUUM INTO`
+- `agentdeck-export.org` when present
+- `current.org` and `archive.org` when present
+- `basic-password` when present
+- `manifest.json`
+
+`GTD_BACKUP_KEEP` controls retention. The backup script prunes only directories matching its own `agentdeck-...` timestamp pattern.
+
+Restore checklist:
+
+```sh
+sudo systemctl stop agentdeck.service
+install -m 600 data/backups/agentdeck-YYYYMMDDTHHMMSSZ/gtd.sqlite data/gtd.sqlite
+rm -f data/gtd.sqlite-shm data/gtd.sqlite-wal
+install -m 600 data/backups/agentdeck-YYYYMMDDTHHMMSSZ/basic-password data/basic-password # if needed
+sudo systemctl start agentdeck.service
 curl -fsS -u "bytenoob:$(cat /home/bytenoob/agentdeck/data/basic-password)" http://127.0.0.1:8787/api/state
 ```
 

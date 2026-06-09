@@ -112,12 +112,26 @@ function sendUnauthorized(res) {
   res.end('Authentication required');
 }
 
+function logServerError(context, error) {
+  console.error(`${context}: ${error?.stack || error?.message || error}`);
+}
+
+function publicErrorFor(error) {
+  const message = String(error?.message || '');
+  if (/not found/i.test(message)) return { status: 404, error: 'Not found' };
+  if (/required|invalid|unsupported|too large|must be|refusing|cannot find/i.test(message)) {
+    return { status: 400, error: 'Invalid request' };
+  }
+  return { status: 500, error: 'Internal server error' };
+}
+
 async function withAutoExport(result) {
   if (!config.autoExport) return result;
   try {
     return { ...result, export: await store.writeOrgExport() };
   } catch (error) {
-    return { ...result, export: { ok: false, error: error.message } };
+    logServerError('Auto-export failed', error);
+    return { ...result, export: { ok: false, error: 'Export failed' } };
   }
 }
 
@@ -301,7 +315,9 @@ async function route(req, res) {
 
     sendJson(res, 405, { ok: false, error: 'Method not allowed' });
   } catch (error) {
-    sendJson(res, 400, { ok: false, error: error.message });
+    logServerError(`${req.method} ${url.pathname} failed`, error);
+    const response = publicErrorFor(error);
+    sendJson(res, response.status, { ok: false, error: response.error });
   }
 }
 

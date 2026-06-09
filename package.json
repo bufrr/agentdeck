@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning server.mjs",
+    "backup": "node --disable-warning=ExperimentalWarning scripts/backup.mjs",
     "test": "node --disable-warning=ExperimentalWarning --test",
     "test:e2e:install": "npx playwright-core install chromium",
     "test:e2e": "node scripts/e2e.mjs"

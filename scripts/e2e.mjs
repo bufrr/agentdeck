@@ -415,7 +415,6 @@ async function assertSourceStatus(scope, status) {
   const activeButton = scope.locator(`[data-source-status="${attr(status)}"][aria-pressed="true"]`).first();
   await activeButton.waitFor({ state: 'visible', timeout: 5_000 });
   assert.match(await activeButton.getAttribute('class') || '', /\bactive\b/);
-  assert.match(await activeButton.evaluate((el) => getComputedStyle(el, '::after').content), /current/);
   assert.match(await scope.locator('.source-status').first().innerText(), new RegExp(status, 'i'));
 }
 

@@ -96,3 +96,55 @@ test('server enforces Basic auth when required', async () => {
     await rm(tmp, { recursive: true, force: true });
   }
 });
+
+test('server hides raw API error details from clients', async () => {
+  const tmp = await mkdtemp(path.join(tmpdir(), 'agentdeck-server-'));
+  const port = await freePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const currentFile = path.join(tmp, 'current.org');
+  const archiveFile = path.join(tmp, 'archive.org');
+  const dbFile = path.join(tmp, 'gtd.sqlite');
+  await writeFile(currentFile, '* Inbox\n', 'utf8');
+  await writeFile(archiveFile, '', 'utf8');
+
+  const server = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'server.mjs'], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      GTD_PORT: String(port),
+      GTD_HOST: '127.0.0.1',
+      GTD_CURRENT_FILE: currentFile,
+      GTD_ARCHIVE_FILE: archiveFile,
+      GTD_DB_FILE: dbFile,
+      GTD_AUTO_EXPORT: '0',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let output = '';
+  server.stdout.on('data', (chunk) => { output += chunk; });
+  server.stderr.on('data', (chunk) => { output += chunk; });
+
+  try {
+    assert.equal(await waitForStatus(`${baseUrl}/api/state`, server), 200);
+    const response = await fetch(`${baseUrl}/api/tasks`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: '' }),
+    });
+    assert.equal(response.status, 400);
+    const body = await response.json();
+    assert.deepEqual(body, { ok: false, error: 'Invalid request' });
+    assert.doesNotMatch(JSON.stringify(body), /Task title is required|gtd\.sqlite|\/tmp\//);
+  } catch (error) {
+    if (output) process.stderr.write(`\n--- server output ---\n${output}--- end server output ---\n`);
+    throw error;
+  } finally {
+    server.kill('SIGTERM');
+    await new Promise((resolve) => {
+      if (server.exitCode !== null) return resolve();
+      server.once('exit', resolve);
+      setTimeout(resolve, 1_000);
+    });
+    await rm(tmp, { recursive: true, force: true });
+  }
+});

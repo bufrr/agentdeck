@@ -2,5 +2,6 @@ node_modules/
 .DS_Store
 data/*.sqlite
 data/*.sqlite-*
+data/backups/
 data/basic-password
 review.md

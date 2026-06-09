@@ -1,31 +1,15 @@
-import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 
-const TODO_STATES = new Set(['TODO', 'NEXT', 'PROJ', 'WAIT', 'DONE', 'CANCELLED']);
 const DONE_STATES = new Set(['DONE', 'CANCELLED']);
 const OPEN_STATES = new Set(['TODO', 'NEXT', 'PROJ', 'WAIT']);
-const AREA_SECTIONS = new Map([
-  ['work', 'Work'],
-  ['parttime', 'Part-Time'],
-  ['learn', 'Learning'],
-  ['other', 'Tasks'],
-]);
 
 export function expandHome(file) {
   if (!file) return file;
   if (file === '~') return os.homedir();
   if (file.startsWith('~/')) return path.join(os.homedir(), file.slice(2));
   return file;
-}
-
-export function htmlEscape(value = '') {
-  return String(value)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
 }
 
 export function slugTitle(raw) {
@@ -90,12 +74,6 @@ function parseTimestamp(value) {
   return Number.isNaN(time.getTime()) ? null : time;
 }
 
-function timestampText(date = new Date()) {
-  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const pad = (n) => String(n).padStart(2, '0');
-  return `[${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${days[date.getDay()]} ${pad(date.getHours())}:${pad(date.getMinutes())}]`;
-}
-
 function lineTimestamp(lines, start, nextStart, label) {
   const re = new RegExp(`^\\s*${label}:\\s*(.+)$`);
   for (let i = start + 1; i < nextStart; i += 1) {
@@ -136,41 +114,8 @@ function notesBody(lines, start, nextStart) {
   return notes.trim() ? notes : '';
 }
 
-function priorityRank(entry) {
-  if (entry.priority === 'A') return 0;
-  if (entry.priority === 'B') return 1;
-  if (entry.priority === 'C') return 2;
-  return 3;
-}
-
-function effortMinutes(entry) {
-  const match = String(entry.effort || '').match(/^(\d+):(\d{2})$/);
-  if (!match) return 9999;
-  return Number(match[1]) * 60 + Number(match[2]);
-}
-
-export function sortActions(entries) {
-  return [...entries].sort((a, b) => {
-    const pa = priorityRank(a);
-    const pb = priorityRank(b);
-    if (pa !== pb) return pa - pb;
-    const ea = effortMinutes(a);
-    const eb = effortMinutes(b);
-    if (ea !== eb) return ea - eb;
-    return a.title.localeCompare(b.title);
-  });
-}
-
-export function sortClosed(entries) {
-  return [...entries].sort((a, b) => (b.closedTime?.getTime() || 0) - (a.closedTime?.getTime() || 0));
-}
-
 function encodeId(file, line, title) {
   return Buffer.from(JSON.stringify({ file, line, title }), 'utf8').toString('base64url');
-}
-
-export function decodeId(id) {
-  return JSON.parse(Buffer.from(id, 'base64url').toString('utf8'));
 }
 
 function attachStats(entries) {
@@ -290,157 +235,4 @@ export async function readEntries(files) {
     }
   }
   return entries;
-}
-
-export function groupEntries(entries, options = {}) {
-  const days = options.days || 7;
-  const staleDays = options.staleDays || 14;
-  const now = options.now || new Date();
-  const cutoff = new Date(now.getTime() - days * 86400000);
-  const staleCutoff = new Date(now.getTime() - staleDays * 86400000);
-  const open = entries.filter((entry) => entry.todo && !DONE_STATES.has(entry.todo));
-  const current = entries.filter((entry) => entry.isCurrent !== false);
-  const currentOpen = current.filter((entry) => entry.todo && !DONE_STATES.has(entry.todo));
-  const explicitNext = currentOpen.filter((entry) => entry.todo === 'NEXT');
-  const candidateNext = currentOpen.filter((entry) => entry.todo === 'TODO' && !entry.hasOpenChild);
-  const actions = sortActions([...explicitNext, ...candidateNext]);
-
-  return {
-    next: sortActions(explicitNext),
-    candidates: sortActions(candidateNext),
-    actions,
-    inbox: current.filter((entry) => entry.level > 1 && entry.section === 'Inbox'),
-    waiting: sortActions(currentOpen.filter((entry) => entry.todo === 'WAIT')),
-    scheduled: sortActions(currentOpen.filter((entry) => entry.scheduled)),
-    someday: current.filter((entry) => entry.level > 1 && entry.section === 'Ideas'),
-    stale: sortActions(currentOpen.filter((entry) => ['TODO', 'NEXT'].includes(entry.todo) && entry.createdTime && entry.createdTime < staleCutoff)),
-    completed: sortClosed(entries.filter((entry) => DONE_STATES.has(entry.todo) && entry.closedTime && entry.closedTime >= cutoff)),
-    projectsMissingNext: sortActions(currentOpen.filter((entry) => entry.todo === 'PROJ' && !entry.hasNextChild)),
-    areas: {
-      work: actions.filter((entry) => entry.area === 'work'),
-      parttime: actions.filter((entry) => entry.area === 'parttime'),
-      learn: actions.filter((entry) => entry.area === 'learn'),
-      other: actions.filter((entry) => entry.area === 'other'),
-    },
-    counts: {
-      open: open.length,
-      actions: actions.length,
-      inbox: current.filter((entry) => entry.level > 1 && entry.section === 'Inbox').length,
-      waiting: currentOpen.filter((entry) => entry.todo === 'WAIT').length,
-      scheduled: currentOpen.filter((entry) => entry.scheduled).length,
-      someday: current.filter((entry) => entry.level > 1 && entry.section === 'Ideas').length,
-      stale: currentOpen.filter((entry) => ['TODO', 'NEXT'].includes(entry.todo) && entry.createdTime && entry.createdTime < staleCutoff).length,
-    },
-  };
-}
-
-export async function readGtdState(config) {
-  const currentFile = expandHome(config.currentFile);
-  const archiveFile = expandHome(config.archiveFile);
-  const current = (await readEntries([currentFile])).map((entry) => ({ ...entry, isCurrent: true }));
-  const archived = (await readEntries([archiveFile])).map((entry) => ({ ...entry, isCurrent: false }));
-  const entries = [...current, ...archived];
-  return {
-    files: { current: currentFile, archive: archiveFile },
-    generatedAt: new Date().toISOString(),
-    groups: groupEntries(entries, config),
-  };
-}
-
-function tagsForArea(area) {
-  if (area === 'work') return ['work'];
-  if (area === 'parttime') return ['parttime'];
-  if (area === 'learn') return ['deep', 'learning'];
-  return [];
-}
-
-function effortForArea(area) {
-  if (area === 'learn') return '1:00';
-  if (area === 'work') return '1:00';
-  return '0:30';
-}
-
-function sectionForArea(area) {
-  return AREA_SECTIONS.get(area) || 'Tasks';
-}
-
-function headingLine(todo, title, tags = []) {
-  const tagText = tags.length ? ` :${tags.join(':')}:` : '';
-  return `** ${todo ? `${todo} ` : ''}${title}${tagText}`;
-}
-
-async function backupFile(file) {
-  const backupDir = path.join(path.dirname(file), 'backups');
-  await mkdir(backupDir, { recursive: true });
-  const stamp = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 17);
-  const backup = path.join(backupDir, `${path.basename(file, '.org')}-${stamp}.org`);
-  await copyFile(file, backup);
-  return backup;
-}
-
-export async function addTask(config, input) {
-  const currentFile = expandHome(config.currentFile);
-  const area = input.area || 'other';
-  const title = slugTitle(input.title);
-  if (!title) throw new Error('Task title is required');
-  const text = await readFile(currentFile, 'utf8');
-  const lines = text.replace(/\r\n/g, '\n').split('\n');
-  const section = sectionForArea(area);
-  const sectionIndex = lines.findIndex((line) => line.trim() === `* ${section}`);
-  if (sectionIndex === -1) throw new Error(`Missing GTD section: ${section}`);
-
-  let insertAt = lines.length;
-  for (let i = sectionIndex + 1; i < lines.length; i += 1) {
-    if (/^\* [^*]/.test(lines[i])) {
-      insertAt = i;
-      break;
-    }
-  }
-
-  const tags = tagsForArea(area);
-  const block = [
-    headingLine(input.todo || 'TODO', title, tags),
-    '   :PROPERTIES:',
-    `   :Effort: ${effortForArea(area)}`,
-    `   :Created: ${timestampText()}`,
-    '   :Source: agentdeck',
-    '   :END:',
-    '',
-  ];
-
-  await backupFile(currentFile);
-  lines.splice(insertAt, 0, ...block);
-  await writeFile(currentFile, lines.join('\n'), 'utf8');
-  return { ok: true, title };
-}
-
-export async function updateTaskState(config, id, todo) {
-  if (!TODO_STATES.has(todo)) throw new Error(`Unsupported TODO state: ${todo}`);
-  const currentFile = expandHome(config.currentFile);
-  const target = decodeId(id);
-  if (path.resolve(target.file) !== path.resolve(currentFile)) {
-    throw new Error('Refusing to mutate non-current org file');
-  }
-  const text = await readFile(currentFile, 'utf8');
-  const lines = text.replace(/\r\n/g, '\n').split('\n');
-  let index = Number(target.line) - 1;
-  if (!lines[index] || !lines[index].includes(target.title)) {
-    index = lines.findIndex((line) => line.startsWith('*') && line.includes(target.title));
-  }
-  if (index < 0) throw new Error(`Cannot find task: ${target.title}`);
-  const parsed = parseHeading(lines[index]);
-  if (!parsed || !parsed.todo) throw new Error(`Target is not a TODO item: ${target.title}`);
-  const stars = '*'.repeat(parsed.level);
-  const priority = parsed.priority ? `[#${parsed.priority}] ` : '';
-  const tags = parsed.tags.length ? ` :${parsed.tags.join(':')}:` : '';
-  lines[index] = `${stars} ${todo} ${priority}${parsed.title}${tags}`;
-  if (DONE_STATES.has(todo)) {
-    const nextHeading = lines.findIndex((line, i) => i > index && /^\*+\s+/.test(line));
-    const end = nextHeading === -1 ? lines.length : nextHeading;
-    const hasClosed = lines.slice(index + 1, end).some((line) => /^\s*CLOSED:/.test(line));
-    if (!hasClosed) lines.splice(index + 1, 0, `   CLOSED: ${timestampText()}`);
-  }
-  await backupFile(currentFile);
-  await writeFile(currentFile, lines.join('\n'), 'utf8');
-  return { ok: true, title: parsed.title, todo };
 }
