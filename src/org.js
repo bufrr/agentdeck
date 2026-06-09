@@ -114,6 +114,28 @@ function propertyValue(lines, start, nextStart, key) {
   return null;
 }
 
+function notesBody(lines, start, nextStart) {
+  const noteLines = [];
+  let inProperties = false;
+  for (let i = start + 1; i < nextStart; i += 1) {
+    const line = lines[i];
+    if (/^\s*:PROPERTIES:\s*$/i.test(line)) {
+      inProperties = true;
+      continue;
+    }
+    if (inProperties) {
+      if (/^\s*:END:\s*$/i.test(line)) inProperties = false;
+      continue;
+    }
+    if (/^\s*(SCHEDULED|DEADLINE|CLOSED):\s*/i.test(line)) continue;
+    noteLines.push(line);
+  }
+  while (noteLines.length && !noteLines[0].trim()) noteLines.shift();
+  while (noteLines.length && !noteLines[noteLines.length - 1].trim()) noteLines.pop();
+  const notes = noteLines.join('\n');
+  return notes.trim() ? notes : '';
+}
+
 function priorityRank(entry) {
   if (entry.priority === 'A') return 0;
   if (entry.priority === 'B') return 1;
@@ -231,10 +253,17 @@ export function parseOrg(text, file) {
     entry.created = propertyValue(lines, start, nextStart, 'Created') || propertyValue(lines, start, nextStart, 'CREATED');
     entry.closed = lineTimestamp(lines, start, nextStart, 'CLOSED') || propertyValue(lines, start, nextStart, 'CLOSED');
     entry.scheduled = lineTimestamp(lines, start, nextStart, 'SCHEDULED') || propertyValue(lines, start, nextStart, 'SCHEDULED');
+    entry.due = lineTimestamp(lines, start, nextStart, 'DEADLINE') || propertyValue(lines, start, nextStart, 'DEADLINE');
+    entry.list = propertyValue(lines, start, nextStart, 'List') || '';
+    entry.focus = /^(true|yes|1)$/i.test(propertyValue(lines, start, nextStart, 'Focus') || '');
+    entry.energy = propertyValue(lines, start, nextStart, 'Energy') || '';
+    entry.project = propertyValue(lines, start, nextStart, 'Project') || '';
     entry.repeat = propertyValue(lines, start, nextStart, 'Repeat') || propertyValue(lines, start, nextStart, 'REPEAT') || '';
+    entry.notes = notesBody(lines, start, nextStart);
     entry.createdTime = parseTimestamp(entry.created);
     entry.closedTime = parseTimestamp(entry.closed);
     entry.scheduledTime = parseTimestamp(entry.scheduled);
+    entry.dueTime = parseTimestamp(entry.due);
     entry.area = areaForEntry(entry);
   }
 

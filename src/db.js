@@ -476,7 +476,7 @@ function rowsToSources(rows) {
 
 function startOfToday(now = new Date()) {
   const date = new Date(now);
-  date.setHours(0, 0, 0, 0);
+  date.setUTCHours(0, 0, 0, 0);
   return date;
 }
 
@@ -540,7 +540,7 @@ function buildSourceGroups(sources) {
 function buildGroups(entries, config) {
   const now = config.now || new Date();
   const staleCutoff = startOfToday(now);
-  staleCutoff.setDate(staleCutoff.getDate() - Number(config.staleDays || 14));
+  staleCutoff.setUTCDate(staleCutoff.getUTCDate() - Number(config.staleDays || 14));
   const open = entries.filter(isOpenEntry);
   const notTrashed = entries.filter((entry) => !entry.trashed);
   const completedCutoff = new Date();
@@ -610,9 +610,10 @@ function buildGroups(entries, config) {
 
 function rowsForExport(rows) {
   const active = rows.filter((row) => !row.archived && !row.trashed_at);
+  const activeIds = new Set(active.map((row) => row.id));
   const byParent = new Map();
   for (const row of active) {
-    const key = row.parent_id || '';
+    const key = row.parent_id && activeIds.has(row.parent_id) ? row.parent_id : '';
     if (!byParent.has(key)) byParent.set(key, []);
     byParent.get(key).push(row);
   }
@@ -726,23 +727,23 @@ export async function createGtdStore(config) {
         const parentId = idByPath.get(parentPathKey(entry)) || null;
         idByPath.set(pathKey(entry), id);
         const status = entry.todo || 'TODO';
-        const list = listForImportedEntry(entry);
+        const list = cleanList(entry.list, listForImportedEntry(entry));
         insertTask.run(
           id,
           parentId,
           entry.title,
           status,
           list,
-          status === 'NEXT' ? 1 : 0,
+          entry.focus ? 1 : (status === 'NEXT' ? 1 : 0),
           entry.area || 'other',
           entry.section || sectionForArea(entry.area),
           entry.priority || null,
           entry.effort || null,
-          null,
+          entry.notes || null,
           toJson(entry.tags),
-          null,
-          null,
-          null,
+          isoFromDate(entry.dueTime),
+          entry.energy || null,
+          entry.project || null,
           cleanRepeat(entry.repeat),
           index * 1024,
           isoFromDate(entry.createdTime) || importedAt,

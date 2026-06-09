@@ -776,20 +776,37 @@ async function runBrowserSuite(baseUrl) {
     await clickMenu(page, gamma, 'SET_PROJECT', project);
     await clickMenu(page, beta, 'SET_PROJECT', project);
     await clickMenu(page, beta, 'SET_DUE', today);
+    await page.waitForFunction((title) => {
+      const row = [...document.querySelectorAll('.task[data-task-title]')]
+        .find((node) => node.dataset.taskTitle === title);
+      return /Due/.test(row?.innerText || '');
+    }, beta, { timeout: 5_000 });
     await clickNav(page, 'next');
     const nextProjectOrder = await visibleTaskTitles(page);
-    assert.ok(nextProjectOrder.indexOf(beta) < nextProjectOrder.indexOf(alphaEdited), 'Expected project action before standalone action in Next');
-    assert.ok(nextProjectOrder.indexOf(gamma) < nextProjectOrder.indexOf(alphaEdited), 'Expected project action before standalone action in Next');
+    assert.ok(
+      nextProjectOrder.indexOf(beta) < nextProjectOrder.indexOf(alphaEdited),
+      `Expected project action before standalone action in Next: ${nextProjectOrder.join(' > ')}`,
+    );
+    assert.ok(
+      nextProjectOrder.indexOf(gamma) < nextProjectOrder.indexOf(alphaEdited),
+      `Expected project action before standalone action in Next: ${nextProjectOrder.join(' > ')}`,
+    );
     await clickNav(page, 'today');
     await waitForTask(page, beta);
     await waitForTask(page, alphaEdited);
     const todayProjectOrder = await visibleTaskTitles(page);
-    assert.ok(todayProjectOrder.indexOf(beta) < todayProjectOrder.indexOf(alphaEdited), 'Expected project action before standalone action in Today');
+    assert.ok(
+      todayProjectOrder.indexOf(beta) < todayProjectOrder.indexOf(alphaEdited),
+      `Expected project action before standalone action in Today: ${todayProjectOrder.join(' > ')}`,
+    );
     await clickNav(page, 'forecast');
     await waitForTask(page, beta);
     await waitForTask(page, alphaEdited);
     const forecastProjectOrder = await visibleTaskTitles(page);
-    assert.ok(forecastProjectOrder.indexOf(beta) < forecastProjectOrder.indexOf(alphaEdited), 'Expected project action before standalone action in Forecast');
+    assert.ok(
+      forecastProjectOrder.indexOf(beta) < forecastProjectOrder.indexOf(alphaEdited),
+      `Expected project action before standalone action in Forecast: ${forecastProjectOrder.join(' > ')}`,
+    );
     await clickNav(page, 'next');
     await clickNav(page, 'projects');
     await page.locator('.project-card').filter({ hasText: project }).waitFor({ state: 'visible', timeout: 5_000 });

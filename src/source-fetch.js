@@ -2,6 +2,7 @@ import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 
 const DEFAULT_MAX_FETCH_BYTES = 1_000_000;
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 export function limitText(value = '', max = 100_000) {
   const text = String(value || '').replace(/\s+\n/g, '\n').replace(/[ \t]{2,}/g, ' ').trim();
@@ -43,14 +44,19 @@ function privateAddress(address) {
 }
 
 async function assertPublicFetchTarget(url, options = {}) {
-  if (options.allowPrivate) return;
+  if (options.allowPrivate || options.skipTargetGuard) return;
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    throw new Error('Source URL must be http or https');
+  }
   const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
   if (!host || host === 'localhost' || host.endsWith('.localhost')) {
     throw new Error('Private network source fetch is not allowed');
   }
-  const addresses = isIP(host)
+  const resolve = options.lookup || lookup;
+  const resolved = isIP(host)
     ? [{ address: host }]
-    : await lookup(host, { all: true, verbatim: true });
+    : await resolve(host, { all: true, verbatim: true });
+  const addresses = Array.isArray(resolved) ? resolved : (resolved ? [resolved] : []);
   if (!addresses.length || addresses.some((entry) => privateAddress(entry.address))) {
     throw new Error('Private network source fetch is not allowed');
   }
@@ -164,21 +170,44 @@ export function twitterSnapshotFromApi(data, input = {}) {
 }
 
 async function fetchWithTimeout(url, options = {}) {
+  const { timeout = 10_000, headers = {} } = options;
+  const fetchOptions = { ...options };
+  for (const key of ['timeout', 'headers', 'allowPrivate', 'lookup', 'maxBytes', 'maxRedirects', 'skipTargetGuard']) {
+    delete fetchOptions[key];
+  }
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), options.timeout || 10_000);
+  const timer = setTimeout(() => controller.abort(), timeout);
   try {
     return await fetch(url, {
-      ...options,
+      ...fetchOptions,
       signal: controller.signal,
       headers: {
         'user-agent': 'gtd-source-fetcher/1.0',
         accept: 'text/html,application/json,text/plain;q=0.9,*/*;q=0.8',
-        ...(options.headers || {}),
+        ...headers,
       },
     });
   } finally {
-    clearTimeout(timeout);
+    clearTimeout(timer);
   }
+}
+
+async function fetchWithValidatedRedirects(rawUrl, options = {}) {
+  let currentUrl = rawUrl instanceof URL ? rawUrl : new URL(String(rawUrl));
+  const maxRedirects = Number.isInteger(options.maxRedirects) ? options.maxRedirects : 5;
+  for (let hop = 0; hop <= maxRedirects; hop += 1) {
+    await assertPublicFetchTarget(currentUrl, options);
+    const response = await fetchWithTimeout(currentUrl.href, {
+      ...options,
+      redirect: 'manual',
+    });
+    if (!REDIRECT_STATUSES.has(response.status)) return response;
+    const location = response.headers?.get?.('location');
+    if (!location) throw new Error('Source redirect missing Location header');
+    if (hop === maxRedirects) throw new Error('Too many redirects while fetching source');
+    currentUrl = new URL(location, currentUrl);
+  }
+  throw new Error('Too many redirects while fetching source');
 }
 
 async function readLimitedText(response, maxBytes = DEFAULT_MAX_FETCH_BYTES) {
@@ -223,8 +252,9 @@ export async function fetchSourceSnapshot(input, options = {}) {
     if (type === 'twitter') {
       const statusId = twitterStatusId(url.href);
       if (statusId) {
-        const response = await fetchWithTimeout(`https://api.fxtwitter.com/2/status/${statusId}`, {
-          headers: { accept: 'application/json' },
+        const response = await fetchWithValidatedRedirects(`https://api.fxtwitter.com/2/status/${statusId}`, {
+          ...options,
+          headers: { ...(options.headers || {}), accept: 'application/json' },
         });
         if (response.ok) {
           const data = await response.json();
@@ -241,8 +271,9 @@ export async function fetchSourceSnapshot(input, options = {}) {
       }
     }
     if (type === 'youtube') {
-      const response = await fetchWithTimeout(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(url.href)}`, {
-        headers: { accept: 'application/json' },
+      const response = await fetchWithValidatedRedirects(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(url.href)}`, {
+        ...options,
+        headers: { ...(options.headers || {}), accept: 'application/json' },
       });
       if (response.ok) {
         const data = await response.json();
@@ -263,8 +294,7 @@ export async function fetchSourceSnapshot(input, options = {}) {
         fetchedAt: new Date().toISOString(),
       };
     }
-    await assertPublicFetchTarget(url, options);
-    const response = await fetchWithTimeout(url.href);
+    const response = await fetchWithValidatedRedirects(url, options);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const contentType = response.headers.get('content-type') || '';
     const text = await readLimitedText(response, options.maxBytes || DEFAULT_MAX_FETCH_BYTES);

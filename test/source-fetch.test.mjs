@@ -50,7 +50,7 @@ test('fetchSourceSnapshot prefers FXTwitter article blocks over tweet preview', 
     const snapshot = await fetchSourceSnapshot({
       url: 'https://x.com/raikucom/status/123',
       type: 'twitter',
-    });
+    }, { skipTargetGuard: true });
     assert.equal(snapshot.type, 'twitter');
     assert.equal(snapshot.title, 'Solana glow-up explained');
     assert.match(snapshot.summary, /TLDR: short article intro/);
@@ -73,6 +73,33 @@ test('fetchSourceSnapshot blocks private network targets by default', async () =
       type: 'article',
     });
     assert.match(snapshot.summary, /Private network source fetch is not allowed/);
+    assert.equal(snapshot.rawText, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('fetchSourceSnapshot rejects redirects to private network targets', async () => {
+  const originalFetch = globalThis.fetch;
+  const fetches = [];
+  globalThis.fetch = async (url) => {
+    fetches.push(String(url));
+    assert.equal(String(url), 'https://public.test/start');
+    return {
+      ok: false,
+      status: 302,
+      headers: new Headers({ location: 'http://127.0.0.1/private' }),
+    };
+  };
+  try {
+    const snapshot = await fetchSourceSnapshot({
+      url: 'https://public.test/start',
+      type: 'article',
+    }, {
+      lookup: async () => [{ address: '93.184.216.34' }],
+    });
+    assert.match(snapshot.summary, /Private network source fetch is not allowed/);
+    assert.equal(fetches.length, 1);
     assert.equal(snapshot.rawText, undefined);
   } finally {
     globalThis.fetch = originalFetch;

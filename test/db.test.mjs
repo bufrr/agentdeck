@@ -246,6 +246,114 @@ test('SQLite store exports current UI data as Org text', async () => {
   store.close();
 });
 
+test('SQLite store exports active children even when a parent is trashed', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'gtd-db-'));
+  const currentFile = path.join(dir, 'current.org');
+  const archiveFile = path.join(dir, 'archive.org');
+  const dbFile = path.join(dir, 'gtd.sqlite');
+  await writeFile(currentFile, '* Work\n', 'utf8');
+  await writeFile(archiveFile, '', 'utf8');
+
+  const store = await createGtdStore({ currentFile, archiveFile, dbFile });
+  const parent = store.addTask({ title: 'temporary parent', area: 'work' });
+  store.addTask({ title: 'active child', area: 'work', parentId: parent.id });
+  store.moveToTrash(parent.id);
+
+  const text = store.exportOrgText();
+  assert.doesNotMatch(text, /Temporary Parent/);
+  assert.match(text, /\* Work[\s\S]*\*\* TODO Active Child :work:/);
+  store.close();
+});
+
+test('SQLite store re-imports exported Org task metadata', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'gtd-db-'));
+  const currentFile = path.join(dir, 'current.org');
+  const archiveFile = path.join(dir, 'archive.org');
+  const dbFile = path.join(dir, 'gtd.sqlite');
+  await writeFile(currentFile, '* Work\n', 'utf8');
+  await writeFile(archiveFile, '', 'utf8');
+
+  const store = await createGtdStore({ currentFile, archiveFile, dbFile });
+  const created = store.addTask({ title: 'round trip task', area: 'work' });
+  store.updateTask(created.id, {
+    title: 'round trip task',
+    todo: 'NEXT',
+    list: 'scheduled',
+    focus: true,
+    area: 'work',
+    effort: '0:45',
+    energy: 'high',
+    dueAt: '2026-06-11',
+    scheduledAt: '2026-06-10',
+    project: 'GTD web',
+    tags: ['work', 'roundtrip'],
+    notes: 'Line one\nLine two',
+    repeat: 'weekly',
+  });
+  const exported = store.exportOrgText();
+  store.close();
+
+  const importedDir = await mkdtemp(path.join(os.tmpdir(), 'gtd-db-import-'));
+  const importedCurrentFile = path.join(importedDir, 'current.org');
+  const importedArchiveFile = path.join(importedDir, 'archive.org');
+  const importedDbFile = path.join(importedDir, 'gtd.sqlite');
+  await writeFile(importedCurrentFile, exported, 'utf8');
+  await writeFile(importedArchiveFile, '', 'utf8');
+
+  const importedStore = await createGtdStore({
+    currentFile: importedCurrentFile,
+    archiveFile: importedArchiveFile,
+    dbFile: importedDbFile,
+  });
+  const state = importedStore.readState();
+  const imported = state.groups.all.find((entry) => entry.title === 'Round Trip Task');
+  assert.equal(imported.todo, 'NEXT');
+  assert.equal(imported.list, 'scheduled');
+  assert.equal(imported.focus, true);
+  assert.equal(imported.area, 'work');
+  assert.equal(imported.effort, '0:45');
+  assert.equal(imported.energy, 'high');
+  assert.equal(imported.project, 'GTD web');
+  assert.equal(imported.due, '2026-06-11');
+  assert.equal(imported.scheduled, '2026-06-10');
+  assert.equal(imported.notes, 'Line one\nLine two');
+  assert.equal(imported.repeat, 'weekly');
+  assert.deepEqual(imported.tags, ['work', 'roundtrip']);
+  importedStore.close();
+});
+
+test('SQLite store treats a UTC date-only scheduled task as due today in UTC+8', async () => {
+  const oldTz = process.env.TZ;
+  process.env.TZ = 'Asia/Shanghai';
+  try {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'gtd-db-'));
+    const currentFile = path.join(dir, 'current.org');
+    const archiveFile = path.join(dir, 'archive.org');
+    const dbFile = path.join(dir, 'gtd.sqlite');
+    await writeFile(currentFile, '* Work\n', 'utf8');
+    await writeFile(archiveFile, '', 'utf8');
+
+    const store = await createGtdStore({
+      currentFile,
+      archiveFile,
+      dbFile,
+      now: new Date('2026-06-09T09:00:00+08:00'),
+    });
+    const task = store.addTask({
+      title: 'today scheduled',
+      area: 'work',
+      list: 'scheduled',
+      scheduledAt: '2026-06-09',
+    });
+    const state = store.readState();
+    assert.equal(state.groups.next.some((entry) => entry.id === task.id), true);
+    store.close();
+  } finally {
+    if (oldTz === undefined) delete process.env.TZ;
+    else process.env.TZ = oldTz;
+  }
+});
+
 test('SQLite store supports UI edit, trash, restore, and delete', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'gtd-db-'));
   const currentFile = path.join(dir, 'current.org');
