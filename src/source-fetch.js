@@ -1,6 +1,59 @@
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
+
+const DEFAULT_MAX_FETCH_BYTES = 1_000_000;
+
 export function limitText(value = '', max = 100_000) {
   const text = String(value || '').replace(/\s+\n/g, '\n').replace(/[ \t]{2,}/g, ' ').trim();
   return text.length > max ? `${text.slice(0, max)}\n\n[truncated]` : text;
+}
+
+function privateIPv4(address) {
+  const parts = String(address).split('.').map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true;
+  const [a, b] = parts;
+  return a === 0
+    || a === 10
+    || a === 127
+    || a === 169 && b === 254
+    || a === 172 && b >= 16 && b <= 31
+    || a === 192 && b === 168
+    || a === 100 && b >= 64 && b <= 127
+    || a === 192 && b === 0
+    || a === 198 && (b === 18 || b === 19)
+    || a >= 224;
+}
+
+function privateIPv6(address) {
+  const value = String(address).toLowerCase();
+  if (value === '::' || value === '::1') return true;
+  if (value.startsWith('::ffff:')) return privateIPv4(value.slice('::ffff:'.length));
+  const first = Number.parseInt(value.split(':')[0] || '0', 16);
+  if (!Number.isFinite(first)) return true;
+  return (first & 0xfe00) === 0xfc00
+    || (first & 0xffc0) === 0xfe80
+    || (first & 0xff00) === 0xff00;
+}
+
+function privateAddress(address) {
+  const family = isIP(address);
+  if (family === 4) return privateIPv4(address);
+  if (family === 6) return privateIPv6(address);
+  return true;
+}
+
+async function assertPublicFetchTarget(url, options = {}) {
+  if (options.allowPrivate) return;
+  const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (!host || host === 'localhost' || host.endsWith('.localhost')) {
+    throw new Error('Private network source fetch is not allowed');
+  }
+  const addresses = isIP(host)
+    ? [{ address: host }]
+    : await lookup(host, { all: true, verbatim: true });
+  if (!addresses.length || addresses.some((entry) => privateAddress(entry.address))) {
+    throw new Error('Private network source fetch is not allowed');
+  }
 }
 
 function decodeEntities(value = '') {
@@ -128,7 +181,33 @@ async function fetchWithTimeout(url, options = {}) {
   }
 }
 
-export async function fetchSourceSnapshot(input) {
+async function readLimitedText(response, maxBytes = DEFAULT_MAX_FETCH_BYTES) {
+  const declaredLength = Number(response.headers.get('content-length') || 0);
+  if (declaredLength > maxBytes) throw new Error(`Response too large (${declaredLength} bytes)`);
+  if (!response.body?.getReader) {
+    const text = await response.text();
+    if (Buffer.byteLength(text, 'utf8') > maxBytes) throw new Error(`Response too large (${Buffer.byteLength(text, 'utf8')} bytes)`);
+    return text;
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const chunks = [];
+  let bytes = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    if (bytes > maxBytes) {
+      await reader.cancel();
+      throw new Error(`Response too large (${bytes} bytes)`);
+    }
+    chunks.push(decoder.decode(value, { stream: true }));
+  }
+  chunks.push(decoder.decode());
+  return chunks.join('');
+}
+
+export async function fetchSourceSnapshot(input, options = {}) {
   const rawUrl = String(input.url || '').trim();
   const url = new URL(rawUrl);
   const type = sourceTypeForUrl(url.href, input.type);
@@ -137,8 +216,8 @@ export async function fetchSourceSnapshot(input) {
     url: url.href,
     type,
     title: String(input.title || titleFromUrl(url.href)).trim(),
-    status: input.status || 'unread',
   };
+  if (Object.hasOwn(input, 'status')) base.status = input.status;
   if (input.fetch === false || input.rawText) return base;
   try {
     if (type === 'twitter') {
@@ -181,14 +260,14 @@ export async function fetchSourceSnapshot(input) {
       return {
         ...base,
         summary: input.summary || 'PDF source captured. Text extraction is not enabled yet.',
-        rawText: input.rawText || '',
         fetchedAt: new Date().toISOString(),
       };
     }
+    await assertPublicFetchTarget(url, options);
     const response = await fetchWithTimeout(url.href);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const contentType = response.headers.get('content-type') || '';
-    const text = await response.text();
+    const text = await readLimitedText(response, options.maxBytes || DEFAULT_MAX_FETCH_BYTES);
     if (contentType.includes('text/html') || /<html[\s>]/i.test(text)) {
       const title = decodeEntities(text.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/\s+/g, ' ').trim() || base.title);
       const rawText = limitText(stripHtml(text));
@@ -211,7 +290,7 @@ export async function fetchSourceSnapshot(input) {
     return {
       ...base,
       summary: input.summary || `Captured URL. Fetch failed: ${error.message}`,
-      rawText: input.rawText || '',
+      ...(Object.hasOwn(input, 'rawText') ? { rawText: input.rawText || '' } : {}),
     };
   }
 }

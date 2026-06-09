@@ -61,3 +61,45 @@ test('fetchSourceSnapshot prefers FXTwitter article blocks over tweet preview', 
     globalThis.fetch = originalFetch;
   }
 });
+
+test('fetchSourceSnapshot blocks private network targets by default', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    throw new Error('private network fetch should not be attempted');
+  };
+  try {
+    const snapshot = await fetchSourceSnapshot({
+      url: 'http://127.0.0.1/private',
+      type: 'article',
+    });
+    assert.match(snapshot.summary, /Private network source fetch is not allowed/);
+    assert.equal(snapshot.rawText, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('fetchSourceSnapshot rejects oversized responses before reading body', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    headers: {
+      get(name) {
+        return name.toLowerCase() === 'content-length' ? '32' : 'text/plain';
+      },
+    },
+    async text() {
+      throw new Error('oversized body should not be read');
+    },
+  });
+  try {
+    const snapshot = await fetchSourceSnapshot({
+      url: 'https://example.com/large',
+      type: 'article',
+    }, { allowPrivate: true, maxBytes: 8 });
+    assert.match(snapshot.summary, /Response too large/);
+    assert.equal(snapshot.rawText, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

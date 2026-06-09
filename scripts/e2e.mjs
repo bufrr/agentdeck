@@ -76,6 +76,13 @@ function escapeRegex(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function localDateOffset(days = 0) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
 function menuPath(action, value) {
   if (action === 'SET_TIME') return ['Time'];
   if (action === 'SET_ENERGY') return ['Energy'];
@@ -719,7 +726,7 @@ async function runBrowserSuite(baseUrl) {
     await clickNav(page, 'next');
 
     log('E2E: scheduled move and unschedule');
-    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const tomorrow = localDateOffset(1);
     await clickMenu(page, alphaEdited, 'SET_SCHEDULE', tomorrow);
     await waitForNoTask(page, alphaEdited);
     await clickNav(page, 'scheduled');
@@ -924,6 +931,8 @@ async function main() {
       GTD_DB_FILE: dbFile,
       GTD_EXPORT_FILE: exportFile,
       GTD_AUTO_EXPORT: '0',
+      GTD_REQUIRE_AUTH: '0',
+      GTD_ALLOW_PRIVATE_FETCH: '1',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

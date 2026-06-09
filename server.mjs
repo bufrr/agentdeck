@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
+import { chmodSync, createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createGtdStore } from './src/db.js';
@@ -18,10 +19,41 @@ const config = {
   dbFile: process.env.GTD_DB_FILE || path.join(__dirname, 'data/gtd.sqlite'),
   exportFile: process.env.GTD_EXPORT_FILE || '~/org/gtd/agentdeck-export.org',
   autoExport: process.env.GTD_AUTO_EXPORT !== '0',
+  allowPrivateFetch: process.env.GTD_ALLOW_PRIVATE_FETCH === '1',
   days: Number(process.env.GTD_REVIEW_DAYS || 7),
   staleDays: Number(process.env.GTD_STALE_DAYS || 14),
 };
 
+function truthy(value) {
+  return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
+}
+
+function readOrCreatePasswordFile(file) {
+  const target = expandHome(file);
+  if (existsSync(target)) return readFileSync(target, 'utf8').trim();
+  mkdirSync(path.dirname(target), { recursive: true });
+  const password = randomBytes(24).toString('base64url');
+  writeFileSync(target, `${password}\n`, { mode: 0o600 });
+  try {
+    chmodSync(target, 0o600);
+  } catch {
+    // Best effort; the initial write mode is the important protection.
+  }
+  return password;
+}
+
+function loadAuthConfig() {
+  const required = truthy(process.env.GTD_REQUIRE_AUTH);
+  const user = process.env.GTD_BASIC_USER || 'agentdeck';
+  const password = process.env.GTD_BASIC_PASSWORD
+    || (process.env.GTD_BASIC_PASSWORD_FILE ? readOrCreatePasswordFile(process.env.GTD_BASIC_PASSWORD_FILE) : '');
+  if (required && !password) {
+    throw new Error('GTD_REQUIRE_AUTH=1 requires GTD_BASIC_PASSWORD or GTD_BASIC_PASSWORD_FILE');
+  }
+  return { required, user, password };
+}
+
+const auth = loadAuthConfig();
 const store = await createGtdStore(config);
 
 const MIME = new Map([
@@ -40,6 +72,44 @@ function sendJson(res, status, body) {
     'content-length': Buffer.byteLength(payload),
   });
   res.end(payload);
+}
+
+function safeEqual(left, right) {
+  const leftBuffer = Buffer.from(String(left || ''));
+  const rightBuffer = Buffer.from(String(right || ''));
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function parseBasicAuth(header = '') {
+  const match = String(header).match(/^Basic\s+(.+)$/i);
+  if (!match) return null;
+  try {
+    const decoded = Buffer.from(match[1], 'base64').toString('utf8');
+    const separator = decoded.indexOf(':');
+    if (separator === -1) return null;
+    return {
+      user: decoded.slice(0, separator),
+      password: decoded.slice(separator + 1),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isAuthorized(req) {
+  if (!auth.required) return true;
+  const credentials = parseBasicAuth(req.headers.authorization);
+  return Boolean(credentials)
+    && safeEqual(credentials.user, auth.user)
+    && safeEqual(credentials.password, auth.password);
+}
+
+function sendUnauthorized(res) {
+  res.writeHead(401, {
+    'www-authenticate': 'Basic realm="AgentDeck", charset="UTF-8"',
+    'cache-control': 'no-store',
+  });
+  res.end('Authentication required');
 }
 
 async function withAutoExport(result) {
@@ -81,7 +151,7 @@ async function serveStatic(req, res, pathname) {
   let target = pathname === '/' ? '/index.html' : pathname;
   target = decodeURIComponent(target);
   const file = path.normalize(path.join(PUBLIC_DIR, target));
-  if (!file.startsWith(PUBLIC_DIR)) {
+  if (file !== PUBLIC_DIR && !file.startsWith(`${PUBLIC_DIR}${path.sep}`)) {
     res.writeHead(403);
     res.end('Forbidden');
     return;
@@ -102,6 +172,11 @@ async function serveStatic(req, res, pathname) {
 async function route(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || `${HOST}:${PORT}`}`);
   try {
+    if (!isAuthorized(req)) {
+      sendUnauthorized(res);
+      return;
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/state') {
       sendJson(res, 200, store.readState());
       return;
@@ -116,7 +191,7 @@ async function route(req, res) {
 
     if (req.method === 'POST' && url.pathname === '/api/sources') {
       const body = await readBody(req);
-      const result = store.addSource(await fetchSourceSnapshot(body));
+      const result = store.addSource(await fetchSourceSnapshot(body, { allowPrivate: config.allowPrivateFetch }));
       sendJson(res, 201, result);
       return;
     }
@@ -239,4 +314,5 @@ server.listen(PORT, HOST, () => {
   console.log(`SQLite DB: ${store.dbFile}`);
   console.log(`Org seed: ${expandHome(config.currentFile)}`);
   console.log(`Org export: ${store.exportFile}${config.autoExport ? ' (auto)' : ''}`);
+  if (auth.required) console.log(`Auth: basic (${auth.user})`);
 });

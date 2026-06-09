@@ -159,6 +159,45 @@ function ensureColumn(db, table, column, definition) {
   if (!columns.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
 }
 
+function ensureTaskColumns(db) {
+  [
+    ['parent_id', 'parent_id TEXT REFERENCES tasks(id) ON DELETE SET NULL'],
+    ['list', "list TEXT NOT NULL DEFAULT 'next'"],
+    ['focus', 'focus INTEGER NOT NULL DEFAULT 0'],
+    ['area', "area TEXT NOT NULL DEFAULT 'other'"],
+    ['section', "section TEXT NOT NULL DEFAULT 'Tasks'"],
+    ['priority', 'priority TEXT'],
+    ['effort', 'effort TEXT'],
+    ['notes', 'notes TEXT'],
+    ['tags_json', "tags_json TEXT NOT NULL DEFAULT '[]'"],
+    ['due_at', 'due_at TEXT'],
+    ['energy', 'energy TEXT'],
+    ['project', 'project TEXT'],
+    ['repeat', 'repeat TEXT'],
+    ['sort_order', 'sort_order INTEGER NOT NULL DEFAULT 0'],
+    ['scheduled_at', 'scheduled_at TEXT'],
+    ['closed_at', 'closed_at TEXT'],
+    ['archived', 'archived INTEGER NOT NULL DEFAULT 0'],
+    ['trashed_at', 'trashed_at TEXT'],
+    ['source_file', 'source_file TEXT'],
+    ['source_line', 'source_line INTEGER'],
+  ].forEach(([column, definition]) => ensureColumn(db, 'tasks', column, definition));
+}
+
+function ensureSourceColumns(db) {
+  [
+    ['type', "type TEXT NOT NULL DEFAULT 'other'"],
+    ['author', 'author TEXT'],
+    ['status', "status TEXT NOT NULL DEFAULT 'unread'"],
+    ['summary', 'summary TEXT'],
+    ['raw_text', 'raw_text TEXT'],
+    ['topics_json', "topics_json TEXT NOT NULL DEFAULT '[]'"],
+    ['published_at', 'published_at TEXT'],
+    ['fetched_at', 'fetched_at TEXT'],
+    ['archived_at', 'archived_at TEXT'],
+  ].forEach(([column, definition]) => ensureColumn(db, 'sources', column, definition));
+}
+
 function migrateTwitterListToSources(db) {
   const migrated = db.prepare('SELECT value FROM meta WHERE key = ?').get('twitter_list_migrated_to_sources');
   if (migrated) return;
@@ -258,12 +297,6 @@ function prepareDb(file) {
       source_line INTEGER
     );
 
-    CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id);
-    CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
-    CREATE INDEX IF NOT EXISTS idx_tasks_area ON tasks(area);
-    CREATE INDEX IF NOT EXISTS idx_tasks_closed ON tasks(closed_at);
-    CREATE INDEX IF NOT EXISTS idx_tasks_trash ON tasks(trashed_at);
-
     CREATE TABLE IF NOT EXISTS events (
       id TEXT PRIMARY KEY,
       task_id TEXT,
@@ -289,10 +322,6 @@ function prepareDb(file) {
       archived_at TEXT
     );
 
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_sources_url ON sources(url);
-    CREATE INDEX IF NOT EXISTS idx_sources_type ON sources(type);
-    CREATE INDEX IF NOT EXISTS idx_sources_status ON sources(status);
-
     CREATE TABLE IF NOT EXISTS source_tasks (
       source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
       task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
@@ -301,15 +330,19 @@ function prepareDb(file) {
       PRIMARY KEY (source_id, task_id, relation)
     );
   `);
-  ensureColumn(db, 'tasks', 'list', "list TEXT NOT NULL DEFAULT 'next'");
-  ensureColumn(db, 'tasks', 'focus', 'focus INTEGER NOT NULL DEFAULT 0');
-  ensureColumn(db, 'tasks', 'due_at', 'due_at TEXT');
-  ensureColumn(db, 'tasks', 'energy', 'energy TEXT');
-  ensureColumn(db, 'tasks', 'project', 'project TEXT');
-  ensureColumn(db, 'tasks', 'repeat', 'repeat TEXT');
+  ensureTaskColumns(db);
+  ensureSourceColumns(db);
   db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id);
+    CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+    CREATE INDEX IF NOT EXISTS idx_tasks_area ON tasks(area);
+    CREATE INDEX IF NOT EXISTS idx_tasks_closed ON tasks(closed_at);
+    CREATE INDEX IF NOT EXISTS idx_tasks_trash ON tasks(trashed_at);
     CREATE INDEX IF NOT EXISTS idx_tasks_list ON tasks(list);
     CREATE INDEX IF NOT EXISTS idx_tasks_focus ON tasks(focus);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_sources_url ON sources(url);
+    CREATE INDEX IF NOT EXISTS idx_sources_type ON sources(type);
+    CREATE INDEX IF NOT EXISTS idx_sources_status ON sources(status);
   `);
   db.prepare('INSERT OR IGNORE INTO meta(key, value) VALUES(?, ?)').run('schema_version', '1');
   const migrated = db.prepare('SELECT value FROM meta WHERE key = ?').get('nirvana_fields_seeded');

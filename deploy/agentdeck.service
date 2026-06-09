@@ -11,6 +11,9 @@ WorkingDirectory=/home/bytenoob/agentdeck
 Environment=NODE_ENV=production
 Environment=GTD_HOST=127.0.0.1
 Environment=GTD_PORT=8787
+Environment=GTD_REQUIRE_AUTH=1
+Environment=GTD_BASIC_USER=bytenoob
+Environment=GTD_BASIC_PASSWORD_FILE=/home/bytenoob/agentdeck/data/basic-password
 ExecStart=/home/bytenoob/.nvm/versions/node/v22.18.0/bin/node --disable-warning=ExperimentalWarning /home/bytenoob/agentdeck/server.mjs
 Restart=always
 RestartSec=3

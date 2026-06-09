@@ -158,6 +158,74 @@ test('SQLite store owns source library and linked reading tasks', async () => {
   store.close();
 });
 
+test('SQLite store preserves source status on duplicate imports without explicit status', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'gtd-db-'));
+  const currentFile = path.join(dir, 'current.org');
+  const archiveFile = path.join(dir, 'archive.org');
+  const dbFile = path.join(dir, 'gtd.sqlite');
+  await writeFile(currentFile, '* Learning\n', 'utf8');
+  await writeFile(archiveFile, '', 'utf8');
+
+  const store = await createGtdStore({ currentFile, archiveFile, dbFile });
+  const source = store.addSource({
+    url: 'https://example.com/reimport',
+    type: 'article',
+    title: 'Original source',
+    status: 'processed',
+    rawText: 'Original captured text.',
+  });
+  const duplicate = store.addSource({
+    url: 'https://example.com/reimport',
+    type: 'article',
+    title: 'Refetched source',
+  });
+  assert.equal(duplicate.existing, true);
+  let state = store.readState();
+  const processed = state.sources.processed.find((entry) => entry.id === source.id);
+  assert.equal(processed.title, 'Refetched source');
+  assert.equal(processed.status, 'processed');
+  assert.equal(processed.rawText, 'Original captured text.');
+  assert.equal(state.sources.inbox.some((entry) => entry.id === source.id), false);
+  store.close();
+});
+
+test('SQLite store backfills older task schemas before querying indexes', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'gtd-db-'));
+  const currentFile = path.join(dir, 'current.org');
+  const archiveFile = path.join(dir, 'archive.org');
+  const dbFile = path.join(dir, 'gtd.sqlite');
+  await writeFile(currentFile, '* Work\n', 'utf8');
+  await writeFile(archiveFile, '', 'utf8');
+
+  const db = new DatabaseSync(dbFile);
+  db.exec(`
+    CREATE TABLE meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+    CREATE TABLE tasks (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'TODO',
+      area TEXT NOT NULL DEFAULT 'other',
+      section TEXT NOT NULL DEFAULT 'Tasks',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    INSERT INTO tasks(id, title, status, area, section, created_at, updated_at)
+    VALUES('legacy-task', 'Legacy Task', 'TODO', 'work', 'Work', '2026-06-01T00:00:00.000Z', '2026-06-01T00:00:00.000Z');
+  `);
+  db.close();
+
+  const store = await createGtdStore({ currentFile, archiveFile, dbFile });
+  let state = store.readState();
+  assert.equal(state.groups.next.some((entry) => entry.id === 'legacy-task'), true);
+  store.moveToTrash('legacy-task');
+  state = store.readState();
+  assert.equal(state.groups.trash.some((entry) => entry.id === 'legacy-task'), true);
+  store.close();
+});
+
 test('SQLite store exports current UI data as Org text', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'gtd-db-'));
   const currentFile = path.join(dir, 'current.org');

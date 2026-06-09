@@ -41,7 +41,7 @@ Production smoke checks:
 
 ```sh
 systemctl status agentdeck.service --no-pager
-curl -fsS http://127.0.0.1:8787/api/state
+curl -fsS -u "bytenoob:$(cat /home/bytenoob/agentdeck/data/basic-password)" http://127.0.0.1:8787/api/state
 ```
 
 ## Deployment Notes
