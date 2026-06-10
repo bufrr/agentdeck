@@ -1,4 +1,4 @@
-import { access, copyFile, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { access, copyFile, mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
@@ -61,6 +61,9 @@ async function pruneBackups(backupDir, keep) {
   for (const entry of entries) {
     if (!entry.isDirectory() || !BACKUP_RE.test(entry.name)) continue;
     const fullPath = path.join(backupDir, entry.name);
+    // Only count completed backups (manifest.json is written last) toward the
+    // retention window, so a partial/failed directory cannot evict good backups.
+    if (!await exists(path.join(fullPath, 'manifest.json'))) continue;
     const info = await stat(fullPath);
     backups.push({ name: entry.name, path: fullPath, mtimeMs: info.mtimeMs });
   }
@@ -87,24 +90,38 @@ export async function createBackup(options = {}) {
   if (!await exists(dbFile)) throw new Error(`SQLite database does not exist: ${dbFile}`);
   await mkdir(backupDir, { recursive: true, mode: 0o700 });
   const backupPath = await uniqueBackupPath(backupDir, stamp);
-  await mkdir(backupPath, { recursive: true, mode: 0o700 });
+
+  // Build the backup in a side directory and only rename it into its final
+  // name once it is complete, so a failure mid-backup never leaves a partial
+  // directory behind (which retention would otherwise count and let evict
+  // healthy backups).
+  const incomingPath = path.join(backupDir, `.incoming-${path.basename(backupPath)}`);
+  await rm(incomingPath, { recursive: true, force: true });
+  await mkdir(incomingPath, { recursive: true, mode: 0o700 });
 
   const copied = [];
-  const dbTarget = path.join(backupPath, 'gtd.sqlite');
-  vacuumInto(dbFile, dbTarget);
-  copied.push({ source: dbFile, file: 'gtd.sqlite' });
-  await copyIfExists(exportFile, path.join(backupPath, 'agentdeck-export.org'), copied);
-  await copyIfExists(currentFile, path.join(backupPath, 'current.org'), copied);
-  await copyIfExists(archiveFile, path.join(backupPath, 'archive.org'), copied);
-  await copyIfExists(passwordFile, path.join(backupPath, 'basic-password'), copied);
+  try {
+    const dbTarget = path.join(incomingPath, 'gtd.sqlite');
+    vacuumInto(dbFile, dbTarget);
+    copied.push({ source: dbFile, file: 'gtd.sqlite' });
+    await copyIfExists(exportFile, path.join(incomingPath, 'agentdeck-export.org'), copied);
+    await copyIfExists(currentFile, path.join(incomingPath, 'current.org'), copied);
+    await copyIfExists(archiveFile, path.join(incomingPath, 'archive.org'), copied);
+    await copyIfExists(passwordFile, path.join(incomingPath, 'basic-password'), copied);
 
-  const manifest = {
-    createdAt: new Date(options.now || Date.now()).toISOString(),
-    backupPath,
-    files: copied,
-    retention: { keep },
-  };
-  await writeFile(path.join(backupPath, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
+    const manifest = {
+      createdAt: new Date(options.now || Date.now()).toISOString(),
+      backupPath,
+      files: copied,
+      retention: { keep },
+    };
+    await writeFile(path.join(incomingPath, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
+    await rename(incomingPath, backupPath);
+  } catch (error) {
+    await rm(incomingPath, { recursive: true, force: true });
+    throw error;
+  }
+
   const deleted = await pruneBackups(backupDir, keep);
   return { ok: true, backupPath, files: copied, deleted };
 }

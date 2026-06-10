@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -62,8 +62,10 @@ test('createBackup prunes only AgentDeck timestamped backup directories', async 
   const db = new DatabaseSync(dbFile);
   db.exec('CREATE TABLE tasks(id TEXT PRIMARY KEY)');
   db.close();
-  await mkdir(path.join(backupDir, 'agentdeck-20260601T000000Z'), { recursive: true });
-  await mkdir(path.join(backupDir, 'agentdeck-20260602T000000Z'), { recursive: true });
+  for (const name of ['agentdeck-20260601T000000Z', 'agentdeck-20260602T000000Z']) {
+    await mkdir(path.join(backupDir, name), { recursive: true });
+    await writeFile(path.join(backupDir, name, 'manifest.json'), '{}\n', 'utf8');
+  }
   await mkdir(path.join(backupDir, 'manual-keep'), { recursive: true });
 
   const result = await createBackup({
@@ -78,4 +80,65 @@ test('createBackup prunes only AgentDeck timestamped backup directories', async 
   assert.equal(path.basename(result.deleted[0]), 'agentdeck-20260601T000000Z');
   assert.equal(path.basename(result.backupPath), 'agentdeck-20260603T000000Z');
   assert.equal((await stat(path.join(backupDir, 'manual-keep'))).isDirectory(), true);
+});
+
+test('createBackup leaves no partial directory when it fails mid-backup', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'agentdeck-backup-'));
+  const dbFile = path.join(dir, 'gtd.sqlite');
+  const backupDir = path.join(dir, 'backups');
+  // Exists but is not a valid SQLite database, so VACUUM INTO throws after the
+  // backup directory has been created.
+  await writeFile(dbFile, 'not a sqlite database', 'utf8');
+
+  await assert.rejects(createBackup({
+    rootDir: dir,
+    dbFile,
+    backupDir,
+    currentFile: path.join(dir, 'current.org'),
+    archiveFile: path.join(dir, 'archive.org'),
+    exportFile: path.join(dir, 'agentdeck-export.org'),
+    passwordFile: path.join(dir, 'basic-password'),
+    now: new Date('2026-06-10T10:00:00Z'),
+    keep: 5,
+  }));
+
+  const entries = await readdir(backupDir);
+  const stray = entries.filter((name) => name.startsWith('agentdeck-') || name.startsWith('.incoming'));
+  assert.deepEqual(stray, [], `no partial backup directory should remain, found: ${entries.join(', ')}`);
+});
+
+test('createBackup pruning ignores partial (manifest-less) backup directories', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'agentdeck-backup-'));
+  const dbFile = path.join(dir, 'gtd.sqlite');
+  const backupDir = path.join(dir, 'backups');
+  const db = new DatabaseSync(dbFile);
+  db.exec('CREATE TABLE tasks(id TEXT PRIMARY KEY)');
+  db.close();
+  // Two completed backups (manifest present) plus one partial directory whose
+  // name sorts newest. If the partial counted toward `keep`, the middle
+  // complete backup would be wrongly evicted.
+  for (const name of ['agentdeck-20260601T000000Z', 'agentdeck-20260602T000000Z']) {
+    await mkdir(path.join(backupDir, name), { recursive: true });
+    await writeFile(path.join(backupDir, name, 'manifest.json'), '{}\n', 'utf8');
+  }
+  await mkdir(path.join(backupDir, 'agentdeck-20260610T235959Z'), { recursive: true });
+
+  const result = await createBackup({
+    rootDir: dir,
+    dbFile,
+    backupDir,
+    currentFile: path.join(dir, 'current.org'),
+    archiveFile: path.join(dir, 'archive.org'),
+    exportFile: path.join(dir, 'agentdeck-export.org'),
+    passwordFile: path.join(dir, 'basic-password'),
+    now: new Date('2026-06-03T00:00:00Z'),
+    keep: 2,
+  });
+
+  // Completed backups are 0601, 0602, 0603(new); keep=2 evicts only the oldest.
+  assert.deepEqual(result.deleted.map((p) => path.basename(p)), ['agentdeck-20260601T000000Z']);
+  // The middle complete backup survives (it would be evicted if the partial counted).
+  assert.equal((await stat(path.join(backupDir, 'agentdeck-20260602T000000Z'))).isDirectory(), true);
+  // The partial directory is neither counted nor pruned.
+  assert.equal((await stat(path.join(backupDir, 'agentdeck-20260610T235959Z'))).isDirectory(), true);
 });
