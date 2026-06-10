@@ -103,6 +103,7 @@ let editingId = null;
 let editDraft = null;
 let editError = '';
 let creatingTask = false;
+let newDraft = null;
 let menuId = null;
 let todayPlannerMode = false;
 let noteMode = localStorage.getItem('gtd-note-mode') || 'preview';
@@ -340,12 +341,18 @@ function localTaskPatchFromBody(body, entry = {}) {
   return patch;
 }
 
+function clearEditFor(id) {
+  if (editingId !== id) return;
+  editingId = null;
+  editDraft = null;
+  editError = '';
+}
+
 function optimisticPatchTask(id, body) {
   const entry = entryById(id);
   const patch = localTaskPatchFromBody(body, entry);
   updateLocalTask(id, (task) => Object.assign(task, patch));
-  editingId = null;
-  creatingTask = false;
+  clearEditFor(id);
   menuId = null;
   renderLocalState();
 }
@@ -355,8 +362,7 @@ function optimisticTrashTask(id, trashed) {
     task.trashed = Boolean(trashed);
     task.trashedAt = trashed ? new Date().toISOString() : null;
   });
-  editingId = null;
-  creatingTask = false;
+  clearEditFor(id);
   menuId = null;
   renderLocalState();
 }
@@ -787,7 +793,10 @@ function resetViewState() {
   energyFilter = 'all';
   todayPlannerMode = false;
   creatingTask = false;
+  newDraft = null;
   editingId = null;
+  editDraft = null;
+  editError = '';
   menuId = null;
 }
 
@@ -1375,21 +1384,28 @@ function setNewTaskMenuValue(choiceButton) {
 }
 
 function newTaskForm() {
-  const list = listForCurrentView();
-  const area = VIEWS[currentView]?.area || els.areaSelect.value || 'other';
-  const project = currentView === 'project' ? effectiveProjectName() : '';
+  const draft = newDraft;
+  const list = draft ? draft.list : listForCurrentView();
+  const area = draft ? draft.area : (VIEWS[currentView]?.area || els.areaSelect.value || 'other');
+  const project = draft ? draft.project : (currentView === 'project' ? effectiveProjectName() : '');
+  const focusAttr = draft && draft.focus ? '1' : '0';
+  const starClass = draft && draft.focus ? 'star active' : 'star';
+  const starLabel = draft && draft.focus ? 'Remove from focus' : 'Add to focus';
   return `
     <form class="task edit-task new-task" data-new-form>
       <div class="task-controls edit-controls">
         <span class="grip" aria-hidden="true"></span>
         <span class="check"></span>
-        <button class="star" type="button" data-action="NEW_FOCUS" data-focus="0" aria-label="Add to focus"></button>
+        <button class="${starClass}" type="button" data-action="NEW_FOCUS" data-focus="${focusAttr}" aria-label="${starLabel}"></button>
       </div>
       ${editorMainFields({
+        title: draft ? draft.title : '',
+        tags: draft ? draft.tags : '',
+        notes: draft ? draft.notes : '',
         cancelAction: 'CANCEL_NEW',
         tagPlaceholder: 'Tags (areas, contacts, contexts) comma separated',
       })}
-      ${editorSideFields({ list, area, project, dueType: 'text', includeArea: false, customMenus: true })}
+      ${editorSideFields({ list, area, project, effort: draft ? draft.effort : '', energy: draft ? draft.energy : '', due: draft ? draft.dueAt : '', repeat: draft ? draft.repeat : '', dueType: 'text', includeArea: false, customMenus: true })}
     </form>
   `;
 }
@@ -1907,8 +1923,28 @@ function searchEmptyCard(query) {
   `;
 }
 
+function captureNewDraft() {
+  const form = els.content.querySelector('[data-new-form]');
+  if (!form) return;
+  const data = new FormData(form);
+  newDraft = {
+    title: String(data.get('title') || ''),
+    tags: String(data.get('tags') || ''),
+    notes: String(data.get('notes') || ''),
+    list: String(data.get('list') || 'next'),
+    area: String(data.get('area') || 'other'),
+    effort: String(data.get('effort') || ''),
+    energy: String(data.get('energy') || ''),
+    dueAt: String(data.get('dueAt') || ''),
+    project: String(data.get('project') || ''),
+    repeat: String(data.get('repeat') || ''),
+    focus: form.querySelector('[data-action="NEW_FOCUS"]')?.dataset.focus === '1',
+  };
+}
+
 function render() {
   if (!state) return;
+  if (creatingTask) captureNewDraft();
   const projectName = currentView === 'project' ? effectiveProjectName() : '';
   if (currentView === 'project') currentProject = projectName;
   const activeSource = currentView === 'source' ? sourceById(currentSourceId) : null;
@@ -2047,7 +2083,10 @@ async function mutate(url, options, mutationOptions = {}) {
     }
     if (!mutationOptions.optimistic) {
       editingId = null;
+      editDraft = null;
+      editError = '';
       creatingTask = false;
+      newDraft = null;
       menuId = null;
     }
     if (body.export?.ok) settingsStatus(`Exported ${body.export.file}`, 'ok');
@@ -2242,6 +2281,7 @@ function focusRapidEntry(view = currentView) {
 function openNewTask(view = currentView) {
   if (view !== currentView) setView(view);
   creatingTask = true;
+  newDraft = null;
   editingId = null;
   menuId = null;
   render();
@@ -2465,6 +2505,7 @@ document.addEventListener('keydown', (event) => {
       editDraft = null;
       editError = '';
       creatingTask = false;
+      newDraft = null;
       menuId = null;
       render();
       return;
@@ -2707,6 +2748,7 @@ els.content.addEventListener('click', async (event) => {
   const { action, id } = button.dataset;
   if (action === 'CANCEL_NEW') {
     creatingTask = false;
+    newDraft = null;
     render();
     return;
   }
@@ -2721,7 +2763,10 @@ els.content.addEventListener('click', async (event) => {
   if (action === 'MENU') {
     menuId = menuId === id ? null : id;
     editingId = null;
+    editDraft = null;
+    editError = '';
     creatingTask = false;
+    newDraft = null;
     render();
     return;
   }
@@ -2730,6 +2775,7 @@ els.content.addEventListener('click', async (event) => {
     editDraft = null;
     editError = '';
     creatingTask = false;
+    newDraft = null;
     menuId = null;
     render();
     return;
@@ -2859,6 +2905,7 @@ els.content.addEventListener('dblclick', (event) => {
   editDraft = null;
   editError = '';
   creatingTask = false;
+  newDraft = null;
   menuId = null;
   render();
 });
