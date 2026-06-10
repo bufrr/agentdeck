@@ -2516,6 +2516,7 @@ document.addEventListener('keydown', (event) => {
       return;
     }
   }
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
   if (inField) return;
 
   const key = event.key.toLowerCase();
