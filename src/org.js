@@ -92,6 +92,12 @@ function propertyValue(lines, start, nextStart, key) {
   return null;
 }
 
+const NOTE_AMBIGUOUS = /^(?:\*+\s|\s*:[A-Za-z]|(?:SCHEDULED|DEADLINE|CLOSED):)/;
+
+function unescapeNoteLine(line) {
+  return line.startsWith(',') && NOTE_AMBIGUOUS.test(line.slice(1)) ? line.slice(1) : line;
+}
+
 function notesBody(lines, start, nextStart) {
   const noteLines = [];
   let inProperties = false;
@@ -106,7 +112,7 @@ function notesBody(lines, start, nextStart) {
       continue;
     }
     if (/^\s*(SCHEDULED|DEADLINE|CLOSED):\s*/i.test(line)) continue;
-    noteLines.push(line);
+    noteLines.push(unescapeNoteLine(line));
   }
   while (noteLines.length && !noteLines[0].trim()) noteLines.shift();
   while (noteLines.length && !noteLines[noteLines.length - 1].trim()) noteLines.pop();

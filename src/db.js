@@ -145,6 +145,12 @@ function tomorrowIso(now = new Date()) {
   return date.toISOString();
 }
 
+const NOTE_AMBIGUOUS = /^(?:\*+\s|\s*:[A-Za-z]|(?:SCHEDULED|DEADLINE|CLOSED):)/;
+
+function escapeNoteLine(line) {
+  return NOTE_AMBIGUOUS.test(line) ? `,${line}` : line;
+}
+
 function headingTags(tags) {
   return tags?.length ? ` :${tags.join(':')}:` : '';
 }
@@ -650,7 +656,7 @@ function exportTree(byParent, parentId, level) {
     if (row.scheduled_at) lines.push(`   SCHEDULED: ${orgTimestamp(row.scheduled_at)}`);
     if (row.due_at) lines.push(`   DEADLINE: ${orgTimestamp(row.due_at)}`);
     if (row.closed_at) lines.push(`   CLOSED: ${orgTimestamp(row.closed_at)}`);
-    if (row.notes) lines.push('', ...row.notes.split('\n'));
+    if (row.notes) lines.push('', ...row.notes.split('\n').map(escapeNoteLine));
     lines.push(...exportTree(byParent, row.id, level + 1));
     lines.push('');
   }
