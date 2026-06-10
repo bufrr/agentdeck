@@ -335,10 +335,6 @@ function localTaskPatchFromBody(body, entry = {}) {
   if (Object.hasOwn(body, 'tags')) patch.tags = Array.isArray(body.tags) ? body.tags : [];
   if (Object.hasOwn(body, 'scheduledAt') && body.scheduledAt !== undefined) patch.scheduled = localDateOrNull(body.scheduledAt);
   if (Object.hasOwn(body, 'dueAt') && body.dueAt !== undefined) patch.due = localDateOrNull(body.dueAt);
-  if (!Object.hasOwn(body, 'todo') && isDoneEntry(entry) && (Object.hasOwn(body, 'list') || (Object.hasOwn(body, 'scheduledAt') && body.scheduledAt !== undefined))) {
-    patch.todo = body.list === 'waiting' ? 'WAIT' : 'TODO';
-    patch.closed = null;
-  }
   return patch;
 }
 
@@ -1262,11 +1258,12 @@ function editorSideFields({
   `;
 }
 
-function taskBodyFromFormData(data, { includeScheduled = false } = {}) {
+const OPEN_LIST_TODOS = new Set(['TODO', 'WAIT', 'NEXT']);
+
+function taskBodyFromFormData(data, { includeScheduled = false, entry = null } = {}) {
   const list = String(data.get('list') || 'next');
   const body = {
     title: data.get('title'),
-    todo: todoForList(list),
     list,
     area: data.get('area'),
     effort: data.get('effort'),
@@ -1277,6 +1274,7 @@ function taskBodyFromFormData(data, { includeScheduled = false } = {}) {
     tags: parseTags(data.get('tags')),
     notes: data.get('notes'),
   };
+  if (!entry || OPEN_LIST_TODOS.has(entry.todo)) body.todo = todoForList(list);
   if (includeScheduled) body.scheduledAt = data.get('scheduledAt');
   return body;
 }
@@ -2875,7 +2873,7 @@ els.content.addEventListener('submit', async (event) => {
   if (!form) return;
   event.preventDefault();
   const data = new FormData(form);
-  const body = taskBodyFromFormData(data, { includeScheduled: true });
+  const body = taskBodyFromFormData(data, { includeScheduled: true, entry: entryById(form.dataset.id) });
   try {
     await patchTask(form.dataset.id, body);
   } catch (error) {
