@@ -100,6 +100,8 @@ let tagFilter = 'all';
 let timeFilter = 'all';
 let energyFilter = 'all';
 let editingId = null;
+let editDraft = null;
+let editError = '';
 let creatingTask = false;
 let menuId = null;
 let todayPlannerMode = false;
@@ -1201,13 +1203,15 @@ function editorTagPlaceholder(value) {
   return value;
 }
 
-function editorMainFields({ title = '', tags = '', notes = '', cancelAction, cancelId = '', tagPlaceholder }) {
+function editorMainFields({ title = '', tags = '', notes = '', cancelAction, cancelId = '', tagPlaceholder, error = '' }) {
   const cancelIdAttr = cancelId ? ` data-id="${esc(cancelId)}"` : '';
+  const errorHtml = error ? `<p class="edit-error" role="alert">${esc(error)}</p>` : '';
   return `
     <div class="task-main edit-main">
       <input class="title-input" name="title" value="${esc(title)}" autocomplete="off" placeholder="To Do">
       <input name="tags" value="${esc(tags)}" autocomplete="off" placeholder="${esc(editorTagPlaceholder(tagPlaceholder))}">
       <textarea name="notes" rows="8" placeholder="Notes">${esc(notes)}</textarea>
+      ${errorHtml}
       <div class="edit-actions">
         <button type="submit">Save Changes</button>
         <button type="button" data-action="${cancelAction}"${cancelIdAttr}>Cancel</button>
@@ -1391,6 +1395,7 @@ function newTaskForm() {
 }
 
 function editTask(entry) {
+  const draft = editDraft && editDraft.id === entry.id ? editDraft : null;
   return `
     <form class="task edit-task" data-edit-form data-id="${entry.id}" data-task-title="${esc(entry.title)}">
       <div class="task-controls edit-controls">
@@ -1399,12 +1404,13 @@ function editTask(entry) {
         ${focusStar(entry)}
       </div>
       ${editorMainFields({
-        title: entry.title,
-        tags: tagsText(entry),
-        notes: entry.notes || '',
+        title: draft ? draft.title : entry.title,
+        tags: draft ? draft.tags : tagsText(entry),
+        notes: draft ? draft.notes : (entry.notes || ''),
         cancelAction: 'CANCEL_EDIT',
         cancelId: entry.id,
         tagPlaceholder: 'Tags (contexts) comma separated',
+        error: editError && editingId === entry.id ? editError : '',
       })}
       ${editorSideFields({
         effort: entry.effort || '',
@@ -2456,6 +2462,8 @@ document.addEventListener('keydown', (event) => {
     if (editingId || menuId || creatingTask) {
       event.preventDefault();
       editingId = null;
+      editDraft = null;
+      editError = '';
       creatingTask = false;
       menuId = null;
       render();
@@ -2718,6 +2726,8 @@ els.content.addEventListener('click', async (event) => {
   }
   if (action === 'EDIT') {
     editingId = id;
+    editDraft = null;
+    editError = '';
     creatingTask = false;
     menuId = null;
     render();
@@ -2725,6 +2735,8 @@ els.content.addEventListener('click', async (event) => {
   }
   if (action === 'CANCEL_EDIT') {
     editingId = null;
+    editDraft = null;
+    editError = '';
     render();
     return;
   }
@@ -2843,6 +2855,8 @@ els.content.addEventListener('dblclick', (event) => {
   const row = event.target.closest('[data-task-id]');
   if (!row) return;
   editingId = row.dataset.taskId;
+  editDraft = null;
+  editError = '';
   creatingTask = false;
   menuId = null;
   render();
@@ -2872,14 +2886,28 @@ els.content.addEventListener('submit', async (event) => {
   const form = event.target.closest('[data-edit-form]');
   if (!form) return;
   event.preventDefault();
+  const id = form.dataset.id;
   const data = new FormData(form);
-  const body = taskBodyFromFormData(data, { includeScheduled: true, entry: entryById(form.dataset.id) });
+  const body = taskBodyFromFormData(data, { includeScheduled: true, entry: entryById(id) });
+  editError = '';
+  editDraft = null;
   try {
-    await patchTask(form.dataset.id, body);
+    await mutate(`/api/tasks/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+    editingId = null;
+    render();
   } catch (error) {
-    const button = form.querySelector('button[type="submit"]');
-    button.textContent = 'Failed';
-    button.title = error.message;
+    editingId = id;
+    editDraft = {
+      id,
+      title: String(data.get('title') || ''),
+      notes: String(data.get('notes') || ''),
+      tags: String(data.get('tags') || ''),
+    };
+    editError = error.message;
+    render();
   }
 });
 
