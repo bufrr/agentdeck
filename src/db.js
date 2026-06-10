@@ -949,6 +949,8 @@ export async function createGtdStore(config) {
       const repeat = cleanRepeat(task.repeat);
       const nextAt = nextRepeatDate(repeat, task.scheduled_at || task.due_at || closedAt);
       if (!repeat || !nextAt) return null;
+      const alreadyRepeated = db.prepare("SELECT 1 FROM events WHERE type = 'task_repeated' AND json_extract(payload_json, '$.from') = ? LIMIT 1").get(task.id);
+      if (alreadyRepeated) return null;
       const created = nowIso();
       const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS value FROM tasks WHERE archived = 0 AND trashed_at IS NULL').get().value;
       const nextId = randomUUID();
@@ -990,7 +992,7 @@ export async function createGtdStore(config) {
       const closedAt = DONE_STATES.has(todo) ? nowIso() : null;
       const list = todo === 'WAIT' ? 'waiting' : (todo === 'NEXT' ? 'next' : task.list);
       db.prepare('UPDATE tasks SET status = ?, list = ?, closed_at = ?, updated_at = ? WHERE id = ?').run(todo, list, closedAt, nowIso(), id);
-      const nextRepeat = DONE_STATES.has(todo) ? this.createNextRepeatTask(task, closedAt) : null;
+      const nextRepeat = (!DONE_STATES.has(task.status) && todo === 'DONE') ? this.createNextRepeatTask(task, closedAt) : null;
       logEvent(id, 'task_status_changed', { from: task.status, to: todo });
       return { ok: true, id, title: task.title, todo, nextRepeat };
     },
@@ -1082,7 +1084,7 @@ export async function createGtdStore(config) {
       if (!task) throw new Error('Task not found');
       const closedAt = nowIso();
       db.prepare('UPDATE tasks SET status = ?, closed_at = ?, updated_at = ? WHERE id = ?').run('DONE', closedAt, closedAt, id);
-      const nextRepeat = this.createNextRepeatTask(task, closedAt);
+      const nextRepeat = !DONE_STATES.has(task.status) ? this.createNextRepeatTask(task, closedAt) : null;
       logEvent(id, 'task_moved_to_logbook', { title: task.title });
       return { ok: true, id, title: task.title, nextRepeat };
     },

@@ -464,3 +464,48 @@ test('SQLite store rolls recurring tasks forward when completed', async () => {
   assert.match(store.exportOrgText(), /:Repeat: weekly/);
   store.close();
 });
+
+test('SQLite store spawns a repeat successor only on an open->done transition', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'gtd-db-'));
+  const currentFile = path.join(dir, 'current.org');
+  const archiveFile = path.join(dir, 'archive.org');
+  const dbFile = path.join(dir, 'gtd.sqlite');
+  await writeFile(currentFile, '* Work\n', 'utf8');
+  await writeFile(archiveFile, '', 'utf8');
+
+  const store = await createGtdStore({ currentFile, archiveFile, dbFile, now: new Date(2026, 5, 7) });
+  const successors = (title, taskId) => {
+    const state = store.readState();
+    return state.groups.scheduled.filter((entry) => entry.title === title && entry.id !== taskId).length;
+  };
+
+  // Double-DONE => exactly one successor.
+  const doubled = store.addTask({ title: 'double done', area: 'work', list: 'scheduled', scheduledAt: '2026-06-08', repeat: 'weekly' });
+  store.updateTaskState(doubled.id, 'DONE');
+  store.updateTaskState(doubled.id, 'DONE');
+  assert.equal(successors('Double Done', doubled.id), 1);
+
+  // DONE -> TODO -> DONE => exactly one total.
+  const undone = store.addTask({ title: 'reopened task', area: 'work', list: 'scheduled', scheduledAt: '2026-06-08', repeat: 'weekly' });
+  store.updateTaskState(undone.id, 'DONE');
+  store.updateTaskState(undone.id, 'TODO');
+  store.updateTaskState(undone.id, 'DONE');
+  assert.equal(successors('Reopened Task', undone.id), 1);
+
+  // CANCELLED => no successor.
+  const cancelled = store.addTask({ title: 'cancel me', area: 'work', list: 'scheduled', scheduledAt: '2026-06-08', repeat: 'weekly' });
+  store.updateTaskState(cancelled.id, 'CANCELLED');
+  assert.equal(successors('Cancel Me', cancelled.id), 0);
+
+  // moveToLogbook on an already-DONE task => no extra successor.
+  const logbook = store.addTask({ title: 'logbook task', area: 'work', list: 'scheduled', scheduledAt: '2026-06-08', repeat: 'weekly' });
+  store.updateTaskState(logbook.id, 'DONE');
+  store.moveToLogbook(logbook.id);
+  assert.equal(successors('Logbook Task', logbook.id), 1);
+
+  // Normal open->DONE via moveToLogbook still spawns exactly one.
+  const fresh = store.addTask({ title: 'fresh logbook', area: 'work', list: 'scheduled', scheduledAt: '2026-06-08', repeat: 'weekly' });
+  store.moveToLogbook(fresh.id);
+  assert.equal(successors('Fresh Logbook', fresh.id), 1);
+  store.close();
+});
