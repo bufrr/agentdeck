@@ -2559,6 +2559,7 @@ els.form.addEventListener('submit', async (event) => {
   event.preventDefault();
   const title = els.titleInput.value.trim();
   if (!title) return;
+  els.titleInput.value = '';
   els.addStatus.hidden = false;
   els.addStatus.textContent = 'Saving';
   els.addStatus.className = '';
@@ -2570,8 +2571,8 @@ els.form.addEventListener('submit', async (event) => {
       method: 'POST',
       body: JSON.stringify({ title, area: els.areaSelect.value, list, focus: currentView === 'focus', tags, project }),
     });
-    els.titleInput.value = '';
   } catch (error) {
+    els.titleInput.value = title;
     els.addStatus.textContent = error.message;
     els.addStatus.className = 'error';
   } finally {
@@ -2866,6 +2867,10 @@ els.content.addEventListener('submit', async (event) => {
   const newForm = event.target.closest('[data-new-form]');
   if (newForm) {
     event.preventDefault();
+    if (newForm.dataset.submitting === '1') return;
+    newForm.dataset.submitting = '1';
+    const button = newForm.querySelector('button[type="submit"]');
+    if (button) button.disabled = true;
     const data = new FormData(newForm);
     const body = {
       ...taskBodyFromFormData(data),
@@ -2877,9 +2882,12 @@ els.content.addEventListener('submit', async (event) => {
         body: JSON.stringify(body),
       });
     } catch (error) {
-      const button = newForm.querySelector('button[type="submit"]');
-      button.textContent = 'Failed';
-      button.title = error.message;
+      newForm.dataset.submitting = '0';
+      if (button) {
+        button.disabled = false;
+        button.textContent = 'Failed';
+        button.title = error.message;
+      }
     }
     return;
   }
