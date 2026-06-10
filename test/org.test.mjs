@@ -66,3 +66,28 @@ test('parseOrg extracts headings, areas, and subtask progress', () => {
   assert.equal(ship.subtasks.percent, 50);
   assert.equal(entries.find((entry) => entry.title === 'Learn the shortcuts').section, 'Ideas');
 });
+
+test('parseOrg reads date-only stamps as UTC midnight and maps repeater cookies', () => {
+  const oldTz = process.env.TZ;
+  process.env.TZ = 'Asia/Shanghai';
+  try {
+    const text = [
+      '* Work',
+      '** TODO Weekly recurring',
+      '   SCHEDULED: <2026-06-12 Fri +1w>',
+      '** TODO Timed task',
+      '   SCHEDULED: [2026-06-12 Fri 09:00]',
+    ].join('\n');
+    const entries = parseOrg(text, '/tmp/current.org');
+    const recurring = entries.find((entry) => entry.title === 'Weekly recurring');
+    // Date-only stamp parses to UTC midnight so the rendered day stays 2026-06-12.
+    assert.equal(recurring.scheduledTime.toISOString().slice(0, 10), '2026-06-12');
+    assert.equal(recurring.repeat, 'weekly');
+    const timed = entries.find((entry) => entry.title === 'Timed task');
+    // A stamp with a time keeps the previous local-wall-clock parse.
+    assert.equal(timed.scheduledTime.getTime(), new Date(2026, 5, 12, 9, 0).getTime());
+  } finally {
+    if (oldTz === undefined) delete process.env.TZ;
+    else process.env.TZ = oldTz;
+  }
+});

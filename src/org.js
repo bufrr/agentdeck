@@ -69,9 +69,18 @@ function parseTimestamp(value) {
   if (!value) return null;
   const match = String(value).match(/(\d{4})-(\d{2})-(\d{2})(?:\s+\w+)?(?:\s+(\d{2}):(\d{2}))?/);
   if (!match) return null;
-  const [, y, m, d, hh = '00', mm = '00'] = match;
-  const time = new Date(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm));
+  const [, y, m, d, hh, mm] = match;
+  const time = hh === undefined
+    ? new Date(Date.UTC(Number(y), Number(m) - 1, Number(d)))
+    : new Date(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm));
   return Number.isNaN(time.getTime()) ? null : time;
+}
+
+const REPEAT_UNITS = { d: 'daily', w: 'weekly', m: 'monthly', y: 'yearly' };
+
+function repeaterCookie(value) {
+  const match = String(value || '').match(/[.+]{0,2}\+\d+([dwmy])/);
+  return match ? REPEAT_UNITS[match[1]] : '';
 }
 
 function lineTimestamp(lines, start, nextStart, label) {
@@ -209,7 +218,11 @@ export function parseOrg(text, file) {
     entry.focus = /^(true|yes|1)$/i.test(propertyValue(lines, start, nextStart, 'Focus') || '');
     entry.energy = propertyValue(lines, start, nextStart, 'Energy') || '';
     entry.project = propertyValue(lines, start, nextStart, 'Project') || '';
-    entry.repeat = propertyValue(lines, start, nextStart, 'Repeat') || propertyValue(lines, start, nextStart, 'REPEAT') || '';
+    entry.repeat = propertyValue(lines, start, nextStart, 'Repeat')
+      || propertyValue(lines, start, nextStart, 'REPEAT')
+      || repeaterCookie(entry.scheduled)
+      || repeaterCookie(entry.due)
+      || '';
     entry.notes = notesBody(lines, start, nextStart);
     entry.createdTime = parseTimestamp(entry.created);
     entry.closedTime = parseTimestamp(entry.closed);

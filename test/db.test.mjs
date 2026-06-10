@@ -399,6 +399,33 @@ test('SQLite store exports tasks whose section is not a hardcoded default', asyn
   importedStore.close();
 });
 
+test('SQLite store imports a date-only repeating Org timestamp with the right UTC date', async () => {
+  const oldTz = process.env.TZ;
+  process.env.TZ = 'Asia/Shanghai';
+  try {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'gtd-db-'));
+    const currentFile = path.join(dir, 'current.org');
+    const archiveFile = path.join(dir, 'archive.org');
+    const dbFile = path.join(dir, 'gtd.sqlite');
+    await writeFile(
+      currentFile,
+      ['* Work', '** TODO Weekly recurring :work:', '   SCHEDULED: <2026-06-12 Fri +1w>', ''].join('\n'),
+      'utf8',
+    );
+    await writeFile(archiveFile, '', 'utf8');
+
+    const store = await createGtdStore({ currentFile, archiveFile, dbFile });
+    const state = store.readState();
+    const recurring = state.groups.all.find((entry) => entry.title === 'Weekly recurring');
+    assert.equal(recurring.scheduled, '2026-06-12');
+    assert.equal(recurring.repeat, 'weekly');
+    store.close();
+  } finally {
+    if (oldTz === undefined) delete process.env.TZ;
+    else process.env.TZ = oldTz;
+  }
+});
+
 test('SQLite store anchors "today" on the local calendar date during the 00:00-08:00 window', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'gtd-db-'));
   const currentFile = path.join(dir, 'current.org');
