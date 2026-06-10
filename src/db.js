@@ -151,8 +151,13 @@ function escapeNoteLine(line) {
   return NOTE_AMBIGUOUS.test(line) ? `,${line}` : line;
 }
 
+function sanitizeTag(tag) {
+  return String(tag).replace(/[^A-Za-z0-9_@#%]/g, '_');
+}
+
 function headingTags(tags) {
-  return tags?.length ? ` :${tags.join(':')}:` : '';
+  const clean = (tags || []).map(sanitizeTag).filter(Boolean);
+  return clean.length ? ` :${clean.join(':')}:` : '';
 }
 
 function orgTimestamp(iso) {

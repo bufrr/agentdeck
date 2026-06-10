@@ -426,6 +426,45 @@ test('SQLite store imports a date-only repeating Org timestamp with the right UT
   }
 });
 
+test('SQLite store sanitizes tags with spaces or colons on export', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'gtd-db-'));
+  const currentFile = path.join(dir, 'current.org');
+  const archiveFile = path.join(dir, 'archive.org');
+  const dbFile = path.join(dir, 'gtd.sqlite');
+  await writeFile(currentFile, '* Work\n', 'utf8');
+  await writeFile(archiveFile, '', 'utf8');
+
+  const store = await createGtdStore({ currentFile, archiveFile, dbFile });
+  const created = store.addTask({ title: 'tag test', area: 'work' });
+  store.updateTask(created.id, {
+    title: 'tag test',
+    todo: 'TODO',
+    area: 'work',
+    tags: ['machine learning', 'foo:bar'],
+  });
+  const exported = store.exportOrgText();
+  store.close();
+
+  const importedDir = await mkdtemp(path.join(os.tmpdir(), 'gtd-db-import-'));
+  const importedCurrentFile = path.join(importedDir, 'current.org');
+  const importedArchiveFile = path.join(importedDir, 'archive.org');
+  const importedDbFile = path.join(importedDir, 'gtd.sqlite');
+  await writeFile(importedCurrentFile, exported, 'utf8');
+  await writeFile(importedArchiveFile, '', 'utf8');
+
+  const importedStore = await createGtdStore({
+    currentFile: importedCurrentFile,
+    archiveFile: importedArchiveFile,
+    dbFile: importedDbFile,
+  });
+  const state = importedStore.readState();
+  const imported = state.groups.all.find((entry) => entry.title === 'Tag Test');
+  assert.notEqual(imported, undefined);
+  assert.equal(imported.title, 'Tag Test');
+  assert.deepEqual(imported.tags, ['machine_learning', 'foo_bar']);
+  importedStore.close();
+});
+
 test('SQLite store anchors "today" on the local calendar date during the 00:00-08:00 window', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'gtd-db-'));
   const currentFile = path.join(dir, 'current.org');
