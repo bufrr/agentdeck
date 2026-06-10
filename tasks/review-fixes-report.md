@@ -6,10 +6,10 @@
 
 ## Final test results
 
-- `npm test` — **35 tests, 35 pass, 0 fail** (baseline at branch point was 23/23; the implementation commits added 12 unit/HTTP regression tests).
+- `npm test` — **37 tests, 37 pass, 0 fail** (baseline at branch point was 23/23; the implementation commits added 14 unit/HTTP regression tests).
 - `npm run test:e2e` — **passed** (all 19 browser scenarios green; chromium spawned its own temp server on an ephemeral port, the production `:8787` instance was untouched).
 
-Both suites are green. No fix-forward and no revert were required.
+Both suites are green. No fix-forward and no revert were required. Every db/org/server/backup fix shipped with a regression test that was verified to **fail on the pre-fix code and pass on the fix**.
 
 ## Findings status (H-1..H-3, M-1..M-14 — 17 in scope)
 
@@ -25,7 +25,7 @@ Both suites are green. No fix-forward and no revert were required.
 | M-5 | fixed | `20ce92b` | fix(db): M-5 export tasks under non-default sections instead of dropping them | db: "exports tasks whose section is not a hardcoded default" |
 | M-6 | fixed | `801cdcf` | fix(org): M-6 parse date-only stamps as UTC midnight and map repeater cookies | db: "imports a date-only repeating Org timestamp with the right UTC date"; org: "reads date-only stamps as UTC midnight and maps repeater cookies" |
 | M-7 | fixed | `ff36f5b` | fix(db): M-7 sanitize tags on export so spaces/colons survive the round-trip | db: "sanitizes tags with spaces or colons on export" |
-| M-8 | skipped | — | — | none — `scripts/backup.mjs` was not assigned to any implementation agent and is untouched on the branch |
+| M-8 | fixed | `a2bf012` | fix(backup): M-8 build backups atomically and gate pruning on manifest | backup: "leaves no partial directory when it fails mid-backup"; backup: "pruning ignores partial (manifest-less) backup directories" |
 | M-9 | fixed | `4cfdb5d` | fix(frontend): M-9 keep inline editor open and show error on failed PATCH | none (frontend-only; covered by e2e suite + agent Chromium probe) |
 | M-10 | fixed | `864a78e` | fix(frontend): M-10 guard quick-add and new-task forms against double submit | none (frontend-only; covered by e2e suite + agent Chromium probe) |
 | M-11 | fixed | `8215f73` | fix(frontend): M-11 preserve in-progress drafts across optimistic and sync renders | none (frontend-only; covered by e2e suite + agent Chromium probe) |
@@ -33,9 +33,10 @@ Both suites are green. No fix-forward and no revert were required.
 | M-13 | fixed | `160ef95` | test(server): M-12 M-13 cover mutation routes and auto-export wiring | server: "auto-export path writes the org file and reports success on mutation" |
 | M-14 | fixed | `39db6f2` | fix(frontend): M-14 let Ctrl/Cmd/Alt key combos pass through to the browser | none (frontend-only; covered by e2e suite + agent Chromium probe) |
 
-**16 fixed, 1 skipped (M-8), 0 reverted.**
+**17 fixed, 0 skipped, 0 reverted.**
 
 ## Follow-ups / not in scope
 
-- **M-8** (backup partial-dir eviction): the only in-scope finding left unaddressed. No implementation agent owned `scripts/backup.mjs`; the fix (atomic temp-dir + rename on success, and a manifest-gated prune) is a self-contained change that should be done in its own TDD commit. Tracked for the next pass.
 - **M-15** (backup never scheduled), **L-10** (DNS-rebinding TOCTOU), **L-16** (no CSP), **L-24** (systemd unit hardening), **L-27** (fonts/icons hot-loaded from a competitor CDN), and **all other Low / Info findings (L-1..L-30, I-1..I-9)** were deliberately out of scope for this pass and were not touched.
+
+*Note: M-8 was missed by the original workflow run (no agent owned `scripts/backup.mjs`); it was caught by the verification gate and fixed in a follow-up commit (`a2bf012`) with the same failing-first TDD discipline as the rest.*
