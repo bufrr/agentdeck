@@ -322,6 +322,41 @@ test('SQLite store re-imports exported Org task metadata', async () => {
   importedStore.close();
 });
 
+test('SQLite store anchors "today" on the local calendar date during the 00:00-08:00 window', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'gtd-db-'));
+  const currentFile = path.join(dir, 'current.org');
+  const archiveFile = path.join(dir, 'archive.org');
+  const dbFile = path.join(dir, 'gtd.sqlite');
+  await writeFile(currentFile, '* Work\n', 'utf8');
+  await writeFile(archiveFile, '', 'utf8');
+
+  // ~02:00 local on 2026-06-10 — the window where a positive UTC offset rolls
+  // the UTC calendar date back to 2026-06-09.
+  const now = new Date(2026, 5, 10, 2, 0, 0);
+  const localDate = '2026-06-10';
+  const localTomorrow = '2026-06-11';
+  // Guard: this assertion only stresses the bug when the host offset actually
+  // puts the UTC date a day behind the local date.
+  const utcDateBehindLocal = now.toISOString().slice(0, 10) !== localDate;
+
+  const store = await createGtdStore({ currentFile, archiveFile, dbFile, now });
+  const today = store.addTask({ title: 'local today', area: 'work', list: 'scheduled', scheduledAt: localDate });
+  let state = store.readState();
+  assert.equal(state.groups.next.some((entry) => entry.id === today.id), true);
+  assert.equal(state.groups.actions.some((entry) => entry.id === today.id), true);
+
+  // A scheduled task with no explicit date defaults to local tomorrow.
+  const noDate = store.addTask({ title: 'auto schedule', area: 'work', list: 'scheduled' });
+  state = store.readState();
+  const scheduled = state.groups.scheduled.find((entry) => entry.id === noDate.id);
+  assert.equal(scheduled.scheduled, localTomorrow);
+
+  if (utcDateBehindLocal) {
+    assert.equal(now.toISOString().slice(0, 10), '2026-06-09');
+  }
+  store.close();
+});
+
 test('SQLite store treats a UTC date-only scheduled task as due today in UTC+8', async () => {
   const oldTz = process.env.TZ;
   process.env.TZ = 'Asia/Shanghai';

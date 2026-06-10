@@ -139,9 +139,8 @@ function listForImportedEntry(entry) {
   return 'next';
 }
 
-function tomorrowIso() {
-  const date = new Date();
-  date.setUTCHours(0, 0, 0, 0);
+function tomorrowIso(now = new Date()) {
+  const date = startOfToday(now);
   date.setUTCDate(date.getUTCDate() + 1);
   return date.toISOString();
 }
@@ -481,8 +480,7 @@ function rowsToSources(rows) {
 
 function startOfToday(now = new Date()) {
   const date = new Date(now);
-  date.setUTCHours(0, 0, 0, 0);
-  return date;
+  return new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
 }
 
 function isOpenEntry(entry) {
@@ -548,8 +546,8 @@ function buildGroups(entries, config) {
   staleCutoff.setUTCDate(staleCutoff.getUTCDate() - Number(config.staleDays || 14));
   const open = entries.filter(isOpenEntry);
   const notTrashed = entries.filter((entry) => !entry.trashed);
-  const completedCutoff = new Date();
-  completedCutoff.setDate(completedCutoff.getDate() - Number(config.days || 7));
+  const completedCutoff = startOfToday(now);
+  completedCutoff.setUTCDate(completedCutoff.getUTCDate() - Number(config.days || 7));
   const tagCounts = new Map();
   const projectCounts = new Map();
   for (const entry of open) {
@@ -808,7 +806,7 @@ export async function createGtdStore(config) {
       if (!TODO_STATES.has(status)) throw new Error(`Unsupported TODO state: ${status}`);
       const scheduledAt = Object.hasOwn(input, 'scheduledAt')
         ? (input.scheduledAt ? isoFromDateOnly(input.scheduledAt) : null)
-        : (list === 'scheduled' ? tomorrowIso() : null);
+        : (list === 'scheduled' ? tomorrowIso(config.now || new Date()) : null);
       const repeat = cleanRepeat(input.repeat);
       const created = nowIso();
       const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS value FROM tasks WHERE archived = 0 AND trashed_at IS NULL').get().value;
