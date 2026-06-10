@@ -184,8 +184,9 @@ async function serveStatic(req, res, pathname) {
 }
 
 async function route(req, res) {
-  const url = new URL(req.url, `http://${req.headers.host || `${HOST}:${PORT}`}`);
+  let url;
   try {
+    url = new URL(req.url, `http://${req.headers.host || `${HOST}:${PORT}`}`);
     if (!isAuthorized(req)) {
       sendUnauthorized(res);
       return;
@@ -315,14 +316,21 @@ async function route(req, res) {
 
     sendJson(res, 405, { ok: false, error: 'Method not allowed' });
   } catch (error) {
-    logServerError(`${req.method} ${url.pathname} failed`, error);
+    logServerError(`${req.method} ${url?.pathname ?? req.url} failed`, error);
     const response = publicErrorFor(error);
     sendJson(res, response.status, { ok: false, error: response.error });
   }
 }
 
 const server = createServer((req, res) => {
-  route(req, res);
+  route(req, res).catch((error) => {
+    logServerError('route', error);
+    try {
+      sendJson(res, 400, { ok: false, error: 'Invalid request' });
+    } catch {
+      // Response may already be sent; nothing more we can safely do.
+    }
+  });
 });
 
 server.listen(PORT, HOST, () => {
