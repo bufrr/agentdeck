@@ -952,10 +952,12 @@ export async function createGtdStore(config) {
 
     createNextRepeatTask(task, closedAt = nowIso()) {
       const repeat = cleanRepeat(task.repeat);
-      const nextAt = nextRepeatDate(repeat, task.scheduled_at || task.due_at || closedAt);
+      let nextAt = nextRepeatDate(repeat, task.scheduled_at || task.due_at || closedAt);
       if (!repeat || !nextAt) return null;
       const alreadyRepeated = db.prepare("SELECT 1 FROM events WHERE type = 'task_repeated' AND json_extract(payload_json, '$.from') = ? LIMIT 1").get(task.id);
       if (alreadyRepeated) return null;
+      const today = startOfToday(config.now || new Date());
+      while (new Date(nextAt) <= today) nextAt = nextRepeatDate(repeat, nextAt);
       const created = nowIso();
       const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS value FROM tasks WHERE archived = 0 AND trashed_at IS NULL').get().value;
       const nextId = randomUUID();

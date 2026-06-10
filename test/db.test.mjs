@@ -465,6 +465,32 @@ test('SQLite store rolls recurring tasks forward when completed', async () => {
   store.close();
 });
 
+test('SQLite store rolls an overdue repeat forward to a single future occurrence', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'gtd-db-'));
+  const currentFile = path.join(dir, 'current.org');
+  const archiveFile = path.join(dir, 'archive.org');
+  const dbFile = path.join(dir, 'gtd.sqlite');
+  await writeFile(currentFile, '* Work\n', 'utf8');
+  await writeFile(archiveFile, '', 'utf8');
+
+  const store = await createGtdStore({ currentFile, archiveFile, dbFile, now: new Date('2026-06-10T00:00:00Z') });
+  const overdue = store.addTask({ title: 'water plants', area: 'work', list: 'scheduled', scheduledAt: '2026-06-01', repeat: 'daily' });
+  const result = store.updateTaskState(overdue.id, 'DONE');
+  // 9 days overdue: successor lands tomorrow, not back at 2026-06-02.
+  assert.equal(result.nextRepeat.scheduledAt, '2026-06-11');
+
+  const state = store.readState();
+  const successors = state.groups.scheduled.filter((entry) => entry.title === 'Water Plants' && entry.id !== overdue.id);
+  assert.equal(successors.length, 1);
+  assert.equal(successors[0].scheduled, '2026-06-11');
+
+  // A task completed on time still advances exactly one period.
+  const onTime = store.addTask({ title: 'standup', area: 'work', list: 'scheduled', scheduledAt: '2026-06-10', repeat: 'daily' });
+  const onTimeResult = store.updateTaskState(onTime.id, 'DONE');
+  assert.equal(onTimeResult.nextRepeat.scheduledAt, '2026-06-11');
+  store.close();
+});
+
 test('SQLite store clamps monthly repeats to the month end', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'gtd-db-'));
   const currentFile = path.join(dir, 'current.org');
