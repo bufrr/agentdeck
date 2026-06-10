@@ -465,6 +465,32 @@ test('SQLite store rolls recurring tasks forward when completed', async () => {
   store.close();
 });
 
+test('SQLite store clamps monthly repeats to the month end', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'gtd-db-'));
+  const currentFile = path.join(dir, 'current.org');
+  const archiveFile = path.join(dir, 'archive.org');
+  const dbFile = path.join(dir, 'gtd.sqlite');
+  await writeFile(currentFile, '* Work\n', 'utf8');
+  await writeFile(archiveFile, '', 'utf8');
+
+  const store = await createGtdStore({ currentFile, archiveFile, dbFile, now: new Date('2026-01-31T00:00:00Z') });
+  const jan = store.addTask({ title: 'pay rent', area: 'work', list: 'scheduled', scheduledAt: '2026-01-31', repeat: 'monthly' });
+  const janResult = store.updateTaskState(jan.id, 'DONE');
+  // Feb 2026 has 28 days (not a leap year): clamp 31 -> 28.
+  assert.equal(janResult.nextRepeat.scheduledAt, '2026-02-28');
+
+  const mar = store.addTask({ title: 'review budget', area: 'work', list: 'scheduled', scheduledAt: '2026-03-31', repeat: 'monthly' });
+  const marResult = store.updateTaskState(mar.id, 'DONE');
+  // April has 30 days: clamp 31 -> 30.
+  assert.equal(marResult.nextRepeat.scheduledAt, '2026-04-30');
+
+  // Mid-month monthly repeats are unaffected.
+  const mid = store.addTask({ title: 'mid month', area: 'work', list: 'scheduled', scheduledAt: '2026-01-15', repeat: 'monthly' });
+  const midResult = store.updateTaskState(mid.id, 'DONE');
+  assert.equal(midResult.nextRepeat.scheduledAt, '2026-02-15');
+  store.close();
+});
+
 test('SQLite store spawns a repeat successor only on an open->done transition', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'gtd-db-'));
   const currentFile = path.join(dir, 'current.org');
