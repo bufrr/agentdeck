@@ -363,6 +363,42 @@ test('SQLite store round-trips note bodies that look like Org headings or drawer
   assert.match(exported2, /Shopping List/);
 });
 
+test('SQLite store exports tasks whose section is not a hardcoded default', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'gtd-db-'));
+  const currentFile = path.join(dir, 'current.org');
+  const archiveFile = path.join(dir, 'archive.org');
+  const dbFile = path.join(dir, 'gtd.sqlite');
+  await writeFile(currentFile, '* Work\n', 'utf8');
+  await writeFile(archiveFile, '', 'utf8');
+
+  const store = await createGtdStore({ currentFile, archiveFile, dbFile });
+  store.addTask({ title: 'launch rocket', area: 'work', section: 'Projects' });
+  store.addTask({ title: 'buy stamps', area: 'work', section: 'Errands' });
+  const text = store.exportOrgText();
+  assert.match(text, /Launch Rocket/);
+  assert.match(text, /Buy Stamps/);
+  store.close();
+
+  const importedDir = await mkdtemp(path.join(os.tmpdir(), 'gtd-db-import-'));
+  const importedCurrentFile = path.join(importedDir, 'current.org');
+  const importedArchiveFile = path.join(importedDir, 'archive.org');
+  const importedDbFile = path.join(importedDir, 'gtd.sqlite');
+  await writeFile(importedCurrentFile, text, 'utf8');
+  await writeFile(importedArchiveFile, '', 'utf8');
+
+  const importedStore = await createGtdStore({
+    currentFile: importedCurrentFile,
+    archiveFile: importedArchiveFile,
+    dbFile: importedDbFile,
+  });
+  const state = importedStore.readState();
+  assert.equal(state.groups.all.some((entry) => entry.title === 'Launch Rocket'), true);
+  assert.equal(state.groups.all.some((entry) => entry.title === 'Buy Stamps'), true);
+  assert.equal(state.groups.all.find((entry) => entry.title === 'Launch Rocket').section, 'Projects');
+  assert.equal(state.groups.all.find((entry) => entry.title === 'Buy Stamps').section, 'Errands');
+  importedStore.close();
+});
+
 test('SQLite store anchors "today" on the local calendar date during the 00:00-08:00 window', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'gtd-db-'));
   const currentFile = path.join(dir, 'current.org');

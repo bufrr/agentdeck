@@ -1182,7 +1182,9 @@ export async function createGtdStore(config) {
     exportOrgText() {
       const rows = allRows();
       const byParent = rowsForExport(rows);
-      const sections = ['Inbox', 'Tasks', 'Work', 'Part-Time', 'Learning', 'Ideas'];
+      const defaults = ['Inbox', 'Tasks', 'Work', 'Part-Time', 'Learning', 'Ideas'];
+      const present = new Set((byParent.get('') || []).map((row) => row.section));
+      const sections = [...defaults, ...[...present].filter((section) => !defaults.includes(section))];
       const lines = ['#+TITLE: GTD Export', `#+DATE: ${orgTimestamp(nowIso())}`, ''];
       for (const section of sections) {
         lines.push(`* ${section}`);
