@@ -324,3 +324,30 @@ test('server auto-export path writes the org file and reports success on mutatio
     await rm(exportDir, { recursive: true, force: true });
   }
 });
+
+test('server creates a task with a project and groups it under that project', async () => {
+  const ctx = await startServer();
+  const { server, baseUrl } = ctx;
+  try {
+    assert.equal(await waitForStatus(`${baseUrl}/api/state`, server), 200);
+
+    const created = await fetch(`${baseUrl}/api/tasks`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'Wire up billing', project: 'Ops' }),
+    });
+    assert.equal(created.status, 201);
+    const id = (await created.json()).id;
+
+    const state = await (await fetch(`${baseUrl}/api/state`)).json();
+    const entry = state.groups.all.find((task) => task.id === id);
+    assert.equal(entry.project, 'Ops');
+    assert.equal(state.groups.projects.some((project) => project.name === 'Ops'), true);
+  } catch (error) {
+    const output = ctx.getOutput();
+    if (output) process.stderr.write(`\n--- server output ---\n${output}--- end server output ---\n`);
+    throw error;
+  } finally {
+    await ctx.stop();
+  }
+});
