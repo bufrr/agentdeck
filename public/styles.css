@@ -959,7 +959,7 @@ select {
 
 .quick-add {
   display: grid;
-  grid-template-columns: 403px 118px auto;
+  grid-template-columns: 403px auto;
   align-items: center;
   gap: 8px;
   max-width: 100%;

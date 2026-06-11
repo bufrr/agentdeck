@@ -10,10 +10,6 @@ const VIEWS = {
   scheduled: { title: 'Scheduled', subtitle: '... for a future date', group: 'scheduled', empty: 'You have nothing Scheduled' },
   someday: { title: 'Someday', subtitle: 'Maybe', group: 'someday', empty: 'Someday list is empty' },
   waiting: { title: 'Waiting', subtitle: '... for someone / on hold', group: 'waiting', empty: 'You are not currently Waiting on anyone' },
-  work: { title: 'Work', subtitle: 'Project actions', area: 'work', empty: 'Work list is empty' },
-  parttime: { title: 'Part-Time', subtitle: 'Project actions', area: 'parttime', empty: 'Part-Time list is empty' },
-  learn: { title: 'Learning', subtitle: 'Project actions', area: 'learn', empty: 'Learning list is empty' },
-  other: { title: 'Other', subtitle: 'Project actions', area: 'other', empty: 'Other list is empty' },
   sourceInbox: { title: 'Source Inbox', subtitle: 'Captured links to process', sourceGroup: 'inbox', empty: 'Source inbox is empty' },
   sourceReading: { title: 'Reading', subtitle: 'Sources currently being read', sourceGroup: 'reading', empty: 'Reading list is empty' },
   sourceTwitter: { title: 'Twitter Sources', subtitle: 'Threads and posts', sourceGroup: 'twitter', empty: 'No Twitter sources' },
@@ -25,7 +21,7 @@ const VIEWS = {
   trash: { title: 'Trash', subtitle: '... to be deleted', group: 'trash', empty: 'Trash is empty.' },
 };
 
-const VIEW_ORDER = ['inbox', 'focus', 'today', 'forecast', 'next', 'later', 'scheduled', 'someday', 'waiting', 'projects', 'review', 'work', 'parttime', 'learn', 'other', 'sourceInbox', 'sourceReading', 'sourceTwitter', 'sourceArticles', 'sourceVideos', 'sourcePdfs', 'sourceProcessed', 'logbook', 'trash'];
+const VIEW_ORDER = ['inbox', 'focus', 'today', 'forecast', 'next', 'later', 'scheduled', 'someday', 'waiting', 'projects', 'review', 'sourceInbox', 'sourceReading', 'sourceTwitter', 'sourceArticles', 'sourceVideos', 'sourcePdfs', 'sourceProcessed', 'logbook', 'trash'];
 
 const LIST_LABELS = {
   inbox: 'Inbox',
@@ -34,13 +30,6 @@ const LIST_LABELS = {
   scheduled: 'Scheduled',
   someday: 'Someday',
   waiting: 'Waiting',
-};
-
-const AREA_LABELS = {
-  work: 'Work',
-  parttime: 'Part-Time',
-  learn: 'Learning',
-  other: 'Other',
 };
 
 const TIME_OPTIONS = ['', '5m', '10m', '15m', '30m', '45m', '1h', '2h', '3h', '4h', '6h', '8h', 'whoa nelly!'];
@@ -95,7 +84,6 @@ let currentView = 'next';
 let currentProject = '';
 let currentContext = 'all';
 let currentSourceId = '';
-let areaFilter = 'all';
 let tagFilter = 'all';
 let timeFilter = 'all';
 let energyFilter = 'all';
@@ -142,7 +130,6 @@ const els = {
   storageDb: document.querySelector('#storage-db'),
 };
 els.titleInput = els.form.elements.title;
-els.areaSelect = els.form.elements.area;
 
 function esc(value = '') {
   return String(value)
@@ -302,15 +289,11 @@ function optimisticPatchSource(id, body) {
   renderLocalState();
 }
 
-function sectionForArea(area) {
-  return AREA_LABELS[area] || 'Other';
-}
-
 function localDateOrNull(value) {
   return value ? String(value).slice(0, 10) : null;
 }
 
-function localTaskPatchFromBody(body, entry = {}) {
+function localTaskPatchFromBody(body) {
   const patch = {};
   if (Object.hasOwn(body, 'title')) {
     patch.title = body.title;
@@ -323,10 +306,6 @@ function localTaskPatchFromBody(body, entry = {}) {
   }
   if (Object.hasOwn(body, 'list')) patch.list = body.list;
   if (Object.hasOwn(body, 'focus')) patch.focus = Boolean(body.focus);
-  if (Object.hasOwn(body, 'area')) {
-    patch.area = body.area || entry.area || 'other';
-    patch.section = sectionForArea(patch.area);
-  }
   if (Object.hasOwn(body, 'effort')) {
     patch.effort = body.effort || '';
     patch.time = patch.effort;
@@ -349,8 +328,7 @@ function clearEditFor(id) {
 }
 
 function optimisticPatchTask(id, body) {
-  const entry = entryById(id);
-  const patch = localTaskPatchFromBody(body, entry);
+  const patch = localTaskPatchFromBody(body);
   updateLocalTask(id, (task) => Object.assign(task, patch));
   clearEditFor(id);
   menuId = null;
@@ -519,9 +497,6 @@ function entriesForView(viewId) {
   if (viewId === 'logbook') return filterEntries(entries.filter((entry) => !entry.trashed && isDoneEntry(entry)), viewId);
   if (viewId === 'trash') return filterEntries(entries.filter((entry) => entry.trashed), viewId);
   const taskView = view || VIEWS.next;
-  if (taskView.area) {
-    return filterEntries(entries.filter((entry) => entry.isCurrent && !entry.trashed && entry.area === taskView.area), viewId);
-  }
   if (viewId === 'focus') {
     return filterEntries(entries.filter((entry) => entry.isCurrent && !entry.trashed && !isDoneEntry(entry) && entry.focus), viewId);
   }
@@ -674,7 +649,7 @@ function projectProgressStats(projectName, entries = entriesForProject(projectNa
 function projectRows() {
   return entriesForSearch()
     .filter((entry) => entry.todo === 'PROJ' && entry.isCurrent && !entry.trashed)
-    .sort((a, b) => (a.area || '').localeCompare(b.area || '') || a.title.localeCompare(b.title));
+    .sort((a, b) => a.title.localeCompare(b.title));
 }
 
 function allCurrentEntries() {
@@ -764,9 +739,6 @@ function sourcesForGroup(group) {
 
 function filterEntries(entries, viewId = currentView) {
   let filtered = entries;
-  if (['next', 'review'].includes(viewId) && areaFilter !== 'all') {
-    filtered = filtered.filter((entry) => entry.area === areaFilter);
-  }
   if (timeFilter !== 'all') {
     const limit = minutesForEffort(timeFilter);
     filtered = filtered.filter((entry) => {
@@ -787,7 +759,6 @@ function filterEntries(entries, viewId = currentView) {
 }
 
 function resetViewState() {
-  areaFilter = 'all';
   tagFilter = 'all';
   timeFilter = 'all';
   energyFilter = 'all';
@@ -840,7 +811,6 @@ function matchesSearch(entry) {
     entry.summary,
     entry.rawText,
     entry.section,
-    entry.area,
     entry.effort,
     entry.energy,
     entry.project,
@@ -876,10 +846,6 @@ function setCounts() {
     scheduled: active.filter((entry) => entryBelongsToListView(entry, 'scheduled')).length,
     someday: active.filter((entry) => entry.list === 'someday').length,
     waiting: active.filter((entry) => entryBelongsToListView(entry, 'waiting')).length,
-    work: active.filter((entry) => entry.area === 'work').length,
-    parttime: active.filter((entry) => entry.area === 'parttime').length,
-    learn: active.filter((entry) => entry.area === 'learn').length,
-    other: active.filter((entry) => entry.area === 'other').length,
     ...(state.sources?.counts || {}),
   };
   for (const [name, value] of Object.entries(counts)) {
@@ -966,19 +932,6 @@ function metadataFiltersHtml() {
   `;
 }
 
-function areaChipsHtml() {
-  if (!['next', 'review'].includes(currentView)) return '';
-  return [
-    ['all', 'All'],
-    ['work', 'Work'],
-    ['parttime', 'Part-Time'],
-    ['learn', 'Learn'],
-    ['other', 'Other'],
-  ].map(([value, label]) =>
-    `<button class="chip ${areaFilter === value ? 'active' : ''}" type="button" data-area="${value}">${esc(label)}</button>`
-  ).join('');
-}
-
 function renderChips() {
   if (currentView === 'source' || VIEWS[currentView]?.sourceGroup) {
     els.chips.hidden = true;
@@ -996,14 +949,13 @@ function renderChips() {
     </div>
   `;
   const metadataFilters = metadataFiltersHtml();
-  const areaChips = areaChipsHtml();
-  if (!areaChips && !metadataFilters && ['inbox', 'trash'].includes(currentView)) {
+  if (!metadataFilters && ['inbox', 'trash'].includes(currentView)) {
     els.chips.hidden = true;
     els.chips.innerHTML = '';
     return;
   }
   els.chips.hidden = false;
-  els.chips.innerHTML = `${plannerToggle}${areaChips}${metadataFilters}${tools}`;
+  els.chips.innerHTML = `${plannerToggle}${metadataFilters}${tools}`;
 }
 
 function progress(entry, statsOverride = null) {
@@ -1100,16 +1052,6 @@ function closedBucket(entry) {
   if (date >= weekStart) return 'This Week';
   if (date >= lastWeekStart) return 'Last Week';
   return 'Older';
-}
-
-function areaBucket(entry) {
-  if (isDoneEntry(entry)) return 'Done';
-  if (entry.list === 'scheduled') return 'Scheduled';
-  if (entry.list === 'waiting' || entry.todo === 'WAIT') return 'Waiting';
-  if (entry.list === 'someday') return 'Someday';
-  if (entry.list === 'later') return 'Later';
-  if (entry.list === 'inbox') return 'Inbox';
-  return 'Next Up';
 }
 
 function meta(entry) {
@@ -1236,10 +1178,8 @@ function editorSideFields({
   dueType = 'date',
   scheduled = '',
   list = 'next',
-  area = 'other',
   project = '',
   repeat = '',
-  includeArea = true,
   includeScheduled = false,
   customMenus = false,
 }) {
@@ -1263,9 +1203,6 @@ function editorSideFields({
         ${Object.entries(REPEAT_LABELS).map(([value, label]) => option(value, label, repeat)).join('')}
       </select>${newMenuControl('repeat', repeatLabel(repeat))}</label>
       ${includeScheduled ? `<label><span>scheduled</span><input name="scheduledAt" type="date" value="${esc(scheduled)}"></label>` : ''}
-      ${includeArea ? `<label class="side-field side-area"><span>area</span><select name="area">
-        ${Object.entries(AREA_LABELS).map(([value, label]) => option(value, label, area)).join('')}
-      </select></label>` : `<input type="hidden" name="area" value="${esc(area)}">`}
       <label class="side-field side-project"><span>project</span><input${nativeClass} name="project" value="${esc(project)}" placeholder="Standalone">${newMenuControl('project', project || 'Standalone')}</label>
     </div>
   `;
@@ -1278,7 +1215,6 @@ function taskBodyFromFormData(data, { includeScheduled = false, entry = null } =
   const body = {
     title: data.get('title'),
     list,
-    area: data.get('area'),
     effort: data.get('effort'),
     dueAt: data.get('dueAt'),
     energy: data.get('energy'),
@@ -1386,8 +1322,7 @@ function setNewTaskMenuValue(choiceButton) {
 function newTaskForm() {
   const draft = newDraft;
   const list = draft ? draft.list : listForCurrentView();
-  const area = draft ? draft.area : (VIEWS[currentView]?.area || els.areaSelect.value || 'other');
-  const project = draft ? draft.project : (currentView === 'project' ? effectiveProjectName() : '');
+  const project = draft ? draft.project : (currentView === 'project' ? effectiveProjectName(currentProject) : '');
   const focusAttr = draft && draft.focus ? '1' : '0';
   const starClass = draft && draft.focus ? 'star active' : 'star';
   const starLabel = draft && draft.focus ? 'Remove from focus' : 'Add to focus';
@@ -1405,7 +1340,7 @@ function newTaskForm() {
         cancelAction: 'CANCEL_NEW',
         tagPlaceholder: 'Tags (areas, contacts, contexts) comma separated',
       })}
-      ${editorSideFields({ list, area, project, effort: draft ? draft.effort : '', energy: draft ? draft.energy : '', due: draft ? draft.dueAt : '', repeat: draft ? draft.repeat : '', dueType: 'text', includeArea: false, customMenus: true })}
+      ${editorSideFields({ list, project, effort: draft ? draft.effort : '', energy: draft ? draft.energy : '', due: draft ? draft.dueAt : '', repeat: draft ? draft.repeat : '', dueType: 'text', customMenus: true })}
     </form>
   `;
 }
@@ -1434,7 +1369,6 @@ function editTask(entry) {
         due: entry.due || '',
         scheduled: entry.scheduled || '',
         list: entry.list || 'next',
-        area: entry.area || 'other',
         project: entry.project || '',
         repeat: entry.repeat || '',
         includeScheduled: true,
@@ -1462,11 +1396,6 @@ function taskMenu(entry) {
       ...DEFAULT_CONTEXT_TAGS,
     ]),
   ].slice(0, 16);
-  const areaItems = [
-    '<span class="menu-label">Area</span>',
-    ...Object.entries(AREA_LABELS)
-      .map(([value, label]) => textItem('SET_AREA', `${entry.area === value ? '• ' : ''}${label}`, value)),
-  ].join('');
   const contextItems = [
     '<span class="menu-label">Contexts</span>',
     ...contextTags.map((tag) => textItem('ADD_TAG', currentTags.includes(tag) ? `✓ ${tag}` : tag, tag)),
@@ -1505,7 +1434,6 @@ function taskMenu(entry) {
     <div class="task-menu" role="menu">
       <span class="menu-title">${esc(entry.title)}</span>
       ${submenu('State', listItems)}
-      ${submenu('Areas', areaItems)}
       ${submenu('Contexts', contextItems)}
       ${submenu('Time', timeItems)}
       ${submenu('Energy', energyItems)}
@@ -1745,16 +1673,10 @@ function projectCard(entry) {
 
 function renderProjectsView(entries) {
   if (!entries.length) return emptyCard('No active projects');
-  const groups = new Map();
-  for (const entry of entries) {
-    const label = AREA_LABELS[entry.area] || 'Other';
-    if (!groups.has(label)) groups.set(label, []);
-    groups.get(label).push(entry);
-  }
-  return [...groups.entries()].map(([label, projects]) => `
-    <div class="section-title"><h2>${esc(label)}</h2><span>${projects.length}</span></div>
-    <div class="project-grid">${projects.map(projectCard).join('')}</div>
-  `).join('');
+  return `
+    <div class="section-title"><h2>Projects</h2><span>${entries.length}</span></div>
+    <div class="project-grid">${entries.map(projectCard).join('')}</div>
+  `;
 }
 
 function sourceImportForm() {
@@ -1904,9 +1826,6 @@ function renderItems(entries, view) {
   if (currentView === 'logbook') {
     return renderGrouped(entries, closedBucket, ['Today', 'This Week', 'Last Week', 'Older']);
   }
-  if (view.area) {
-    return renderGrouped(entries, areaBucket, ['Next Up', 'Scheduled', 'Waiting', 'Later', 'Someday', 'Inbox', 'Done']);
-  }
   const primaryLabel = view.section || view.title || 'Actions';
   return `
     ${renderGrouped(entries, (entry) => listBucket(entry, primaryLabel), [primaryLabel, 'Done'])}
@@ -1932,7 +1851,6 @@ function captureNewDraft() {
     tags: String(data.get('tags') || ''),
     notes: String(data.get('notes') || ''),
     list: String(data.get('list') || 'next'),
-    area: String(data.get('area') || 'other'),
     effort: String(data.get('effort') || ''),
     energy: String(data.get('energy') || ''),
     dueAt: String(data.get('dueAt') || ''),
@@ -1963,7 +1881,6 @@ function render() {
   const entries = entriesForRender(query);
   els.title.textContent = view.title;
   els.subtitle.textContent = view.subtitle;
-  els.areaSelect.value = view.area || 'other';
   document.body.classList.toggle('project-mode', currentView === 'project');
   document.body.classList.toggle('source-mode', currentView === 'source' || Boolean(view.sourceGroup));
   renderChips();
@@ -2174,7 +2091,7 @@ async function reorderDrop(container, draggedId, targetId, position) {
 }
 
 function navDropTarget(target) {
-  return target?.closest?.('[data-drop-plan-date], [data-drop-list], [data-drop-area], [data-drop-action], [data-drop-focus], [data-drop-project]') || null;
+  return target?.closest?.('[data-drop-plan-date], [data-drop-list], [data-drop-action], [data-drop-focus], [data-drop-project]') || null;
 }
 
 async function dropOnNavTarget(id, target) {
@@ -2191,10 +2108,6 @@ async function dropOnNavTarget(id, target) {
       todo: todoForList(list),
       scheduledAt: list === 'scheduled' && !entry.scheduled ? relativeDate(1) : undefined,
     });
-    return;
-  }
-  if (target.dataset.dropArea) {
-    await patchTask(id, { area: target.dataset.dropArea });
     return;
   }
   if (target.dataset.dropProject) {
@@ -2293,9 +2206,9 @@ function openNewTask(view = currentView) {
 function showShortcuts() {
   window.alert([
     'Create: n, Shift+n',
-    'Create in list: i inbox, x next, f focus, p project area',
+    'Create in list: i inbox, x next, f focus',
     'Navigate: t today, u forecast',
-    'Navigate: 1 inbox, 2 focus, 3 next, 4 projects, 5 review, 6 work, 7 part-time, 8 learning, 9 logbook, 0 trash',
+    'Navigate: 1 inbox, 2 focus, 3 next, 4 projects, 5 review, 9 logbook, 0 trash',
     'Search: /',
     'Shortcuts: k',
     'Close menu/edit: Esc',
@@ -2343,12 +2256,6 @@ els.chips.addEventListener('click', (event) => {
   const planner = event.target.closest('[data-planner-mode]');
   if (planner) {
     todayPlannerMode = !todayPlannerMode;
-    render();
-    return;
-  }
-  const area = event.target.closest('[data-area]');
-  if (area) {
-    areaFilter = area.dataset.area;
     render();
     return;
   }
@@ -2526,9 +2433,6 @@ document.addEventListener('keydown', (event) => {
     3: 'next',
     4: 'projects',
     5: 'review',
-    6: 'work',
-    7: 'parttime',
-    8: 'learn',
     9: 'logbook',
     0: 'trash',
   };
@@ -2574,7 +2478,6 @@ document.addEventListener('keydown', (event) => {
     i: 'inbox',
     f: 'focus',
     x: 'next',
-    p: 'work',
   };
   if (key === 'l' && event.shiftKey) createTargets.l = 'later';
   const targetView = createTargets[key];
@@ -2611,7 +2514,7 @@ els.form.addEventListener('submit', async (event) => {
     const project = currentView === 'project' ? effectiveProjectName() : undefined;
     await mutate('/api/tasks', {
       method: 'POST',
-      body: JSON.stringify({ title, area: els.areaSelect.value, list, focus: currentView === 'focus', tags, project }),
+      body: JSON.stringify({ title, list, focus: currentView === 'focus', tags, project }),
     });
   } catch (error) {
     els.titleInput.value = title;
@@ -2807,12 +2710,8 @@ els.content.addEventListener('click', async (event) => {
     window.location.href = `mailto:?subject=${subject}&body=${body}`;
     return;
   }
-  if (action === 'MANAGE_AREAS' || action === 'MANAGE_CONTEXTS') {
-    const messages = {
-      MANAGE_AREAS: 'Areas are Work, Part-Time, Learning, and Other in this GTD setup.',
-      MANAGE_CONTEXTS: 'Contexts are represented as tags for now.',
-    };
-    window.alert(messages[action]);
+  if (action === 'MANAGE_CONTEXTS') {
+    window.alert('Contexts are represented as tags for now.');
     menuId = null;
     render();
     return;
@@ -2847,8 +2746,6 @@ els.content.addEventListener('click', async (event) => {
       await patchTask(id, plannerPatch(entry, button.dataset.plan));
     } else if (action === 'SET_DUE') {
       await patchTask(id, { dueAt: button.dataset.value });
-    } else if (action === 'SET_AREA') {
-      await patchTask(id, { area: button.dataset.value });
     } else if (action === 'SET_PROJECT') {
       await patchTask(id, { project: button.dataset.value });
     } else if (action === 'ADD_TAG') {

@@ -89,7 +89,6 @@ function menuPath(action, value) {
   if (action === 'SET_REPEAT') return ['Repeat'];
   if (action === 'SET_DUE') return ['Due'];
   if (action === 'SET_SCHEDULE') return ['Schedule'];
-  if (action === 'SET_AREA') return ['Areas'];
   if (['ADD_TAG', 'CLEAR_TAGS'].includes(action)) return ['Contexts'];
   if (action === 'CONVERT_PROJECT') return ['Convert'];
   if (action === 'SET_PROJECT') return ['Move', 'Projects'];
@@ -502,14 +501,6 @@ async function runBrowserSuite(baseUrl) {
     await quickAdd(page, planner);
     await quickAdd(page, project);
 
-    log('E2E: area chips');
-    await page.locator('.chip[data-area="other"]').click();
-    await waitForTask(page, alpha);
-    await page.locator('.chip[data-area="work"]').click();
-    await waitForNoTask(page, alpha);
-    await page.locator('.chip[data-area="all"]').click();
-    await waitForTask(page, alpha);
-
     log('E2E: search and clear');
     await page.locator('#search').fill(beta);
     await waitForTask(page, beta);
@@ -526,7 +517,6 @@ async function runBrowserSuite(baseUrl) {
     await editForm.locator('input[name="title"]').fill(alphaEdited);
     await editForm.locator('input[name="tags"]').fill(`e2e, ${suffix}`);
     await editForm.locator('textarea[name="notes"]').fill('Edited from browser automation.');
-    await editForm.locator('select[name="area"]').selectOption('work');
     await editForm.locator('select[name="effort"]').selectOption('15m');
     await editForm.locator('select[name="energy"]').selectOption('medium');
     await editForm.locator('button[type="submit"]').click();
@@ -758,14 +748,6 @@ async function runBrowserSuite(baseUrl) {
     await dragTaskToTask(page, gamma, beta, 'before');
     const titlesAfterDrag = await visibleTaskTitles(page);
     assert.ok(titlesAfterDrag.indexOf(gamma) < titlesAfterDrag.indexOf(beta), 'Expected dragged task before target task');
-
-    log('E2E: task menu area assignment after simplified sidebar');
-    await page.locator('.chip[data-area="other"]').click();
-    await waitForTask(page, gamma);
-    await clickMenu(page, gamma, 'SET_AREA', 'work');
-    await waitForNoTask(page, gamma);
-    await page.locator('.chip[data-area="all"]').click();
-    await waitForTask(page, gamma);
 
     log('E2E: copy and convert project');
     await clickMenu(page, project, 'COPY');
