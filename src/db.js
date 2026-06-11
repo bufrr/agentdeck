@@ -12,12 +12,6 @@ const LISTS = new Set(['inbox', 'next', 'later', 'scheduled', 'someday', 'waitin
 const REPEATS = new Set(['', 'daily', 'weekly', 'monthly']);
 const SOURCE_TYPES = new Set(['twitter', 'article', 'youtube', 'pdf', 'github', 'doc', 'other']);
 const SOURCE_STATUSES = new Set(['unread', 'reading', 'processed', 'archived']);
-const AREA_SECTIONS = new Map([
-  ['work', 'Work'],
-  ['parttime', 'Part-Time'],
-  ['learn', 'Learning'],
-  ['other', 'Tasks'],
-]);
 
 function nowIso() {
   return new Date().toISOString();
@@ -90,22 +84,6 @@ function dateText(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
   return date.toISOString().slice(0, 10);
-}
-
-function sectionForArea(area) {
-  return AREA_SECTIONS.get(area) || 'Tasks';
-}
-
-function tagsForArea(area) {
-  if (area === 'work') return ['work'];
-  if (area === 'parttime') return ['parttime'];
-  if (area === 'learn') return ['deep', 'learning'];
-  return [];
-}
-
-function effortForArea(area) {
-  if (area === 'learn' || area === 'work') return '1:00';
-  return '0:30';
 }
 
 function cleanList(value, fallback = 'next') {
@@ -393,7 +371,6 @@ function rowsToEntries(rows) {
     list: row.list || 'next',
     focus: Boolean(row.focus),
     section: row.section,
-    area: row.area,
     priority: row.priority,
     effort: row.effort,
     time: row.effort,
@@ -586,12 +563,6 @@ function buildGroups(entries, config) {
     waiting: sortEntries(open.filter((entry) => entry.list === 'waiting' || entry.todo === 'WAIT')),
     completed: sortEntries(notTrashed.filter((entry) => DONE_STATES.has(entry.todo) && (!entry.closedTime || entry.closedTime >= completedCutoff))).reverse(),
     trash: sortEntries(entries.filter((entry) => entry.trashed)),
-    areas: {
-      work: [],
-      parttime: [],
-      learn: [],
-      other: [],
-    },
     tags: [...tagCounts.entries()]
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => a.name.localeCompare(b.name)),
@@ -601,10 +572,6 @@ function buildGroups(entries, config) {
     counts: {},
   };
   groups.actions = groups.next;
-
-  for (const area of Object.keys(groups.areas)) {
-    groups.areas[area] = sortEntries(open.filter((entry) => entry.area === area));
-  }
 
   groups.counts = {
     inbox: groups.inbox.length,
@@ -674,10 +641,10 @@ export async function createGtdStore(config) {
 
   const insertTask = db.prepare(`
     INSERT OR REPLACE INTO tasks (
-      id, parent_id, title, status, list, focus, area, section, priority, effort,
+      id, parent_id, title, status, list, focus, section, priority, effort,
       notes, tags_json, due_at, energy, project, repeat, sort_order, created_at, updated_at,
       scheduled_at, closed_at, archived, trashed_at, source_file, source_line
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const insertSource = db.prepare(`
     INSERT INTO sources (
@@ -749,8 +716,7 @@ export async function createGtdStore(config) {
           status,
           list,
           entry.focus ? 1 : (status === 'NEXT' ? 1 : 0),
-          entry.area || 'other',
-          entry.section || sectionForArea(entry.area),
+          entry.section || 'Tasks',
           entry.priority || null,
           entry.effort || null,
           entry.notes || null,
@@ -810,8 +776,7 @@ export async function createGtdStore(config) {
     addTask(input) {
       const title = slugTitle(input.title);
       if (!title) throw new Error('Task title is required');
-      const area = input.area || 'other';
-      const section = input.section || sectionForArea(area);
+      const section = input.section || 'Tasks';
       const list = cleanList(input.list, input.scheduledAt ? 'scheduled' : 'next');
       const status = input.todo || (list === 'waiting' ? 'WAIT' : 'TODO');
       if (!TODO_STATES.has(status)) throw new Error(`Unsupported TODO state: ${status}`);
@@ -829,12 +794,11 @@ export async function createGtdStore(config) {
         status,
         list,
         input.focus ? 1 : 0,
-        area,
         section,
         input.priority || null,
-        input.effort || effortForArea(area),
+        input.effort || null,
         input.notes || null,
-        toJson(input.tags || tagsForArea(area)),
+        toJson(input.tags || []),
         input.dueAt ? isoFromDateOnly(input.dueAt) : null,
         input.energy || null,
         input.project || null,
@@ -849,7 +813,7 @@ export async function createGtdStore(config) {
         null,
         null,
       );
-      logEvent(id, 'task_created', { title, area, section, list, repeat });
+      logEvent(id, 'task_created', { title, section, list, repeat });
       return { ok: true, id, title };
     },
 
@@ -946,7 +910,6 @@ export async function createGtdStore(config) {
       ].filter(Boolean).join('\n\n');
       const task = this.addTask({
         title: input.title || `Read: ${source.title}`,
-        area: input.area || 'learn',
         list: input.list || 'next',
         tags: input.tags || tags,
         notes: input.notes || notes,
@@ -977,8 +940,7 @@ export async function createGtdStore(config) {
         'TODO',
         'scheduled',
         0,
-        task.area || 'other',
-        task.section || sectionForArea(task.area),
+        task.section || 'Tasks',
         task.priority || null,
         task.effort || null,
         task.notes || null,
@@ -1020,8 +982,7 @@ export async function createGtdStore(config) {
       if (!title) throw new Error('Task title is required');
       const status = input.todo || task.status;
       if (!TODO_STATES.has(status)) throw new Error(`Unsupported TODO state: ${status}`);
-      const area = input.area || task.area;
-      const section = input.section || sectionForArea(area);
+      const section = input.section || task.section || 'Tasks';
       const list = cleanList(input.list, task.list || 'next');
       const focus = Object.hasOwn(input, 'focus') ? (input.focus ? 1 : 0) : task.focus;
       const scheduledAt = Object.hasOwn(input, 'scheduledAt')
@@ -1037,7 +998,7 @@ export async function createGtdStore(config) {
         : null;
       db.prepare(`
         UPDATE tasks
-        SET title = ?, status = ?, list = ?, focus = ?, area = ?, section = ?,
+        SET title = ?, status = ?, list = ?, focus = ?, section = ?,
             effort = ?, notes = ?, tags_json = ?, scheduled_at = ?, due_at = ?,
             energy = ?, project = ?, repeat = ?, closed_at = ?, updated_at = ?
         WHERE id = ?
@@ -1046,7 +1007,6 @@ export async function createGtdStore(config) {
         status,
         list,
         focus,
-        area,
         section,
         input.effort === undefined ? task.effort : input.effort || null,
         input.notes === undefined ? task.notes : input.notes || null,
@@ -1060,7 +1020,7 @@ export async function createGtdStore(config) {
         nowIso(),
         id,
       );
-      logEvent(id, 'task_updated', { title, status, list, focus: Boolean(focus), area, section, repeat });
+      logEvent(id, 'task_updated', { title, status, list, focus: Boolean(focus), section, repeat });
       return { ok: true, id, title, todo: status };
     },
 
@@ -1126,8 +1086,7 @@ export async function createGtdStore(config) {
         DONE_STATES.has(task.status) ? 'TODO' : task.status,
         task.list || 'next',
         task.focus || 0,
-        task.area || 'other',
-        task.section || sectionForArea(task.area),
+        task.section || 'Tasks',
         task.priority || null,
         task.effort || null,
         task.notes || null,

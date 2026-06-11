@@ -74,6 +74,28 @@ test('SQLite store owns UI create and status updates', async () => {
   store.close();
 });
 
+test('addTask stores an explicit project and leaves area out of the entry', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'gtd-db-'));
+  const currentFile = path.join(dir, 'current.org');
+  const archiveFile = path.join(dir, 'archive.org');
+  const dbFile = path.join(dir, 'gtd.sqlite');
+  await writeFile(currentFile, '* Work\n', 'utf8');
+  await writeFile(archiveFile, '', 'utf8');
+
+  const store = await createGtdStore({ currentFile, archiveFile, dbFile });
+  const created = store.addTask({ title: 'ship it', project: 'Website redesign' });
+  const standalone = store.addTask({ title: 'lonely task' });
+  const state = store.readState();
+  const withProject = state.groups.all.find((entry) => entry.id === created.id);
+  const without = state.groups.all.find((entry) => entry.id === standalone.id);
+  assert.equal(withProject.project, 'Website redesign');
+  assert.equal('area' in withProject, false);
+  assert.equal(withProject.section, 'Tasks');
+  assert.equal(without.project, '');
+  assert.equal(state.groups.projects.some((p) => p.name === 'Website redesign'), true);
+  store.close();
+});
+
 test('SQLite store migrates old Twitter task list into source library', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'gtd-db-'));
   const currentFile = path.join(dir, 'current.org');
@@ -238,9 +260,10 @@ test('SQLite store exports current UI data as Org text', async () => {
   const store = await createGtdStore({ currentFile, archiveFile, dbFile, exportFile });
   assert.equal(store.exportFile, exportFile);
   assert.equal(store.readState().files.export, exportFile);
-  store.addTask({ title: 'export from ui', area: 'learn' });
+  store.addTask({ title: 'export from ui', project: 'Deck', tags: ['deep', 'learning'] });
   const text = store.exportOrgText();
-  assert.match(text, /\* Learning[\s\S]*\*\* TODO Export From UI :deep:learning:/);
+  assert.match(text, /\* Tasks[\s\S]*\*\* TODO Export From UI :deep:learning:/);
+  assert.match(text, /:Project: Deck/);
   await store.writeOrgExport();
   assert.match(await readFile(exportFile, 'utf8'), /Export From UI/);
   store.close();
@@ -255,13 +278,13 @@ test('SQLite store exports active children even when a parent is trashed', async
   await writeFile(archiveFile, '', 'utf8');
 
   const store = await createGtdStore({ currentFile, archiveFile, dbFile });
-  const parent = store.addTask({ title: 'temporary parent', area: 'work' });
-  store.addTask({ title: 'active child', area: 'work', parentId: parent.id });
+  const parent = store.addTask({ title: 'temporary parent' });
+  store.addTask({ title: 'active child', parentId: parent.id });
   store.moveToTrash(parent.id);
 
   const text = store.exportOrgText();
   assert.doesNotMatch(text, /Temporary Parent/);
-  assert.match(text, /\* Work[\s\S]*\*\* TODO Active Child :work:/);
+  assert.match(text, /\* Tasks[\s\S]*\*\* TODO Active Child/);
   store.close();
 });
 
@@ -310,7 +333,6 @@ test('SQLite store re-imports exported Org task metadata', async () => {
   assert.equal(imported.todo, 'NEXT');
   assert.equal(imported.list, 'scheduled');
   assert.equal(imported.focus, true);
-  assert.equal(imported.area, 'work');
   assert.equal(imported.effort, '0:45');
   assert.equal(imported.energy, 'high');
   assert.equal(imported.project, 'GTD web');
@@ -354,7 +376,7 @@ test('SQLite store round-trips note bodies that look like Org headings or drawer
   assert.equal(importedGrocery.notes, trickyNotes);
   const sibling = state.groups.all.find((entry) => entry.title === 'Innocent Sibling');
   assert.notEqual(sibling, undefined);
-  assert.equal(sibling.section, 'Work');
+  assert.equal(sibling.section, 'Tasks');
 
   // The sibling must survive a second export -> cold re-import too.
   const exported2 = importedStore.exportOrgText();
@@ -558,7 +580,6 @@ test('SQLite store supports UI edit, trash, restore, and delete', async () => {
   let state = store.readState();
   const edited = state.groups.next.find((entry) => entry.id === created.id);
   assert.equal(edited.title, 'Polished Task');
-  assert.equal(edited.area, 'work');
   assert.equal(edited.scheduled, '2026-06-08');
   assert.equal(edited.due, '2026-06-09');
   assert.equal(edited.energy, 'high');

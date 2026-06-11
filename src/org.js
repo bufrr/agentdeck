@@ -27,14 +27,6 @@ export function slugTitle(raw) {
     .join(' ');
 }
 
-export function areaForEntry(entry) {
-  const tags = entry.tags || [];
-  if (entry.section === 'Work' || tags.includes('work')) return 'work';
-  if (entry.section === 'Part-Time' || tags.includes('parttime') || tags.includes('part-time')) return 'parttime';
-  if (entry.section === 'Learning' || tags.includes('learning')) return 'learn';
-  return 'other';
-}
-
 function cleanTitle(title = '') {
   return title
     .replace(/^\s*(TODO|NEXT|PROJ|WAIT|DONE|CANCELLED)\s+/, '')
@@ -228,7 +220,6 @@ export function parseOrg(text, file) {
     entry.closedTime = parseTimestamp(entry.closed);
     entry.scheduledTime = parseTimestamp(entry.scheduled);
     entry.dueTime = parseTimestamp(entry.due);
-    entry.area = areaForEntry(entry);
   }
 
   return attachStats(entries).map((entry) => {

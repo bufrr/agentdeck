@@ -47,11 +47,10 @@ Ship note line two.
 ** Learn the shortcuts
 `;
 
-test('parseOrg extracts headings, areas, and subtask progress', () => {
+test('parseOrg extracts headings and subtask progress', () => {
   const entries = parseOrg(sample, '/tmp/current.org');
   const ship = entries.find((entry) => entry.title === 'Ship API');
   assert.equal(ship.todo, 'NEXT');
-  assert.equal(ship.area, 'work');
   assert.equal(ship.list, 'scheduled');
   assert.equal(ship.focus, true);
   assert.equal(ship.effort, '1:00');
