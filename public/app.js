@@ -130,6 +130,7 @@ const els = {
   storageDb: document.querySelector('#storage-db'),
 };
 els.titleInput = els.form.elements.title;
+els.projectSelect = els.form.elements.project;
 
 function esc(value = '') {
   return String(value)
@@ -872,6 +873,22 @@ function renderProjects() {
   `).join('');
 }
 
+function renderQuickAddProject(selected = '') {
+  if (!els.projectSelect) return;
+  const active = els.projectSelect === document.activeElement;
+  if (active) return;
+  const names = (state?.groups?.projects || []).map((proj) => proj.name).filter(Boolean);
+  const known = names.includes(selected);
+  els.projectSelect.innerHTML = [
+    option('', 'Standalone', known ? 'never' : ''),
+    ...names.map((name) => option(name, name, known ? selected : 'never')),
+    option('__new__', '+ New project…', 'never'),
+  ].join('');
+  const newProjectInput = els.form.querySelector('[data-newproject] input');
+  if (newProjectInput) newProjectInput.value = '';
+  syncNewProjectInput(els.form);
+}
+
 function renderStorage() {
   if (!state || !els.storagePrimary) return;
   const storage = state.storage || {};
@@ -1171,6 +1188,34 @@ function editorMainFields({ title = '', tags = '', notes = '', cancelAction, can
   `;
 }
 
+function syncNewProjectInput(scope) {
+  const select = scope?.querySelector?.('[data-project-select]');
+  if (!select) return;
+  const field = select.closest('label')?.parentElement?.querySelector('[data-newproject]')
+    || scope.querySelector('[data-newproject]');
+  if (!field) return;
+  const isNew = select.value === '__new__';
+  field.hidden = !isNew;
+}
+
+function projectPickerField(selected = '', newProject = '') {
+  const names = (state?.groups?.projects || []).map((proj) => proj.name).filter(Boolean);
+  const isNew = selected === '__new__';
+  const known = !isNew && names.includes(selected);
+  const standaloneSelected = !isNew && !known ? '' : 'never';
+  const opts = names.map((name) => option(name, name, known ? selected : 'never')).join('');
+  return `
+    <label class="side-field side-project"><span>project</span>
+      <select name="project" data-project-select>
+        ${option('', 'Standalone', standaloneSelected)}
+        ${opts}
+        ${option('__new__', '+ New project…', isNew ? '__new__' : 'never')}
+      </select>
+    </label>
+    <label class="side-field side-newproject" data-newproject ${isNew ? '' : 'hidden'}><span>new</span>
+      <input name="newProject" value="${esc(newProject)}" placeholder="New project name"></label>`;
+}
+
 function editorSideFields({
   effort = '',
   energy = '',
@@ -1179,6 +1224,7 @@ function editorSideFields({
   scheduled = '',
   list = 'next',
   project = '',
+  newProject = '',
   repeat = '',
   includeScheduled = false,
   customMenus = false,
@@ -1203,7 +1249,7 @@ function editorSideFields({
         ${Object.entries(REPEAT_LABELS).map(([value, label]) => option(value, label, repeat)).join('')}
       </select>${newMenuControl('repeat', repeatLabel(repeat))}</label>
       ${includeScheduled ? `<label><span>scheduled</span><input name="scheduledAt" type="date" value="${esc(scheduled)}"></label>` : ''}
-      <label class="side-field side-project"><span>project</span><input${nativeClass} name="project" value="${esc(project)}" placeholder="Standalone">${newMenuControl('project', project || 'Standalone')}</label>
+      ${projectPickerField(project, newProject)}
     </div>
   `;
 }
@@ -1212,13 +1258,15 @@ const OPEN_LIST_TODOS = new Set(['TODO', 'WAIT', 'NEXT']);
 
 function taskBodyFromFormData(data, { includeScheduled = false, entry = null } = {}) {
   const list = String(data.get('list') || 'next');
+  const projectSel = String(data.get('project') || '');
+  const project = projectSel === '__new__' ? String(data.get('newProject') || '').trim() : projectSel;
   const body = {
     title: data.get('title'),
     list,
     effort: data.get('effort'),
     dueAt: data.get('dueAt'),
     energy: data.get('energy'),
-    project: data.get('project'),
+    project,
     repeat: data.get('repeat'),
     tags: parseTags(data.get('tags')),
     notes: data.get('notes'),
@@ -1254,13 +1302,6 @@ function newTaskMenuChoices(field) {
   }
   if (field === 'repeat') {
     return Object.entries(REPEAT_LABELS).map(([value, label]) => ({ value, label, emptyLabel: 'repeat' }));
-  }
-  if (field === 'project') {
-    const projects = (state?.groups?.projects || []).map((project) => project.name).filter(Boolean);
-    return [
-      { value: '', label: 'Standalone', emptyLabel: 'Standalone' },
-      ...projects.map((name) => ({ value: name, label: name })),
-    ];
   }
   return [];
 }
@@ -1323,6 +1364,7 @@ function newTaskForm() {
   const draft = newDraft;
   const list = draft ? draft.list : listForCurrentView();
   const project = draft ? draft.project : (currentView === 'project' ? effectiveProjectName(currentProject) : '');
+  const newProject = draft ? draft.newProject : '';
   const focusAttr = draft && draft.focus ? '1' : '0';
   const starClass = draft && draft.focus ? 'star active' : 'star';
   const starLabel = draft && draft.focus ? 'Remove from focus' : 'Add to focus';
@@ -1340,7 +1382,7 @@ function newTaskForm() {
         cancelAction: 'CANCEL_NEW',
         tagPlaceholder: 'Tags (areas, contacts, contexts) comma separated',
       })}
-      ${editorSideFields({ list, project, effort: draft ? draft.effort : '', energy: draft ? draft.energy : '', due: draft ? draft.dueAt : '', repeat: draft ? draft.repeat : '', dueType: 'text', customMenus: true })}
+      ${editorSideFields({ list, project, newProject, effort: draft ? draft.effort : '', energy: draft ? draft.energy : '', due: draft ? draft.dueAt : '', repeat: draft ? draft.repeat : '', dueType: 'text', customMenus: true })}
     </form>
   `;
 }
@@ -1855,6 +1897,7 @@ function captureNewDraft() {
     energy: String(data.get('energy') || ''),
     dueAt: String(data.get('dueAt') || ''),
     project: String(data.get('project') || ''),
+    newProject: String(data.get('newProject') || ''),
     repeat: String(data.get('repeat') || ''),
     focus: form.querySelector('[data-action="NEW_FOCUS"]')?.dataset.focus === '1',
   };
@@ -1881,6 +1924,7 @@ function render() {
   const entries = entriesForRender(query);
   els.title.textContent = view.title;
   els.subtitle.textContent = view.subtitle;
+  renderQuickAddProject(currentView === 'project' ? effectiveProjectName(currentProject) : '');
   document.body.classList.toggle('project-mode', currentView === 'project');
   document.body.classList.toggle('source-mode', currentView === 'source' || Boolean(view.sourceGroup));
   renderChips();
@@ -2275,6 +2319,16 @@ els.chips.addEventListener('change', (event) => {
   render();
 });
 
+document.addEventListener('change', (event) => {
+  const select = event.target.closest('[data-project-select]');
+  if (!select) return;
+  const scope = select.closest('[data-new-form], [data-edit-form], #quick-add') || document;
+  syncNewProjectInput(scope);
+  if (select.value === '__new__') {
+    scope.querySelector('[data-newproject] input')?.focus();
+  }
+});
+
 els.tagList?.addEventListener('click', (event) => {
   const button = event.target.closest('[data-tag-filter]');
   if (!button) return;
@@ -2511,7 +2565,9 @@ els.form.addEventListener('submit', async (event) => {
   try {
     const list = listForCurrentView();
     const tags = tagFilter && !['all', '-'].includes(tagFilter) ? [tagFilter] : undefined;
-    const project = currentView === 'project' ? effectiveProjectName() : undefined;
+    const data = new FormData(els.form);
+    const projectSel = String(data.get('project') || '');
+    const project = projectSel === '__new__' ? String(data.get('newProject') || '').trim() : projectSel;
     await mutate('/api/tasks', {
       method: 'POST',
       body: JSON.stringify({ title, list, focus: currentView === 'focus', tags, project }),

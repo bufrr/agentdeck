@@ -959,7 +959,7 @@ select {
 
 .quick-add {
   display: grid;
-  grid-template-columns: 403px auto;
+  grid-template-columns: 403px 118px auto auto;
   align-items: center;
   gap: 8px;
   max-width: 100%;
@@ -1114,16 +1114,22 @@ body.source-mode .quick-add {
 }
 
 .quick-add select,
-.quick-add button {
+.quick-add button,
+.quick-add .quick-add-newproject {
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.12s;
 }
 
 .quick-add:focus-within select,
-.quick-add:focus-within button {
+.quick-add:focus-within button,
+.quick-add:focus-within .quick-add-newproject {
   opacity: 1;
   pointer-events: auto;
+}
+
+.quick-add .quick-add-newproject input {
+  width: 100%;
 }
 
 .quick-add select {
@@ -2829,7 +2835,8 @@ kbd {
   }
 
   .quick-add select,
-  .quick-add button {
+  .quick-add button,
+  .quick-add .quick-add-newproject {
     opacity: 1;
     pointer-events: auto;
   }

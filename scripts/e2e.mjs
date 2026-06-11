@@ -749,6 +749,36 @@ async function runBrowserSuite(baseUrl) {
     const titlesAfterDrag = await visibleTaskTitles(page);
     assert.ok(titlesAfterDrag.indexOf(gamma) < titlesAfterDrag.indexOf(beta), 'Expected dragged task before target task');
 
+    log('E2E: edit-form project picker creates and clears a project');
+    const tempProject = `E2E ${suffix} editproj`;
+    let gammaRow = await waitForTask(page, gamma);
+    await gammaRow.dblclick();
+    let gammaEdit = page.locator(`form.task[data-task-title="${attr(gamma)}"]`);
+    await gammaEdit.waitFor({ state: 'visible', timeout: 5_000 });
+    await gammaEdit.locator('select[name="project"]').selectOption('__new__');
+    await gammaEdit.locator('[data-newproject] input[name="newProject"]').waitFor({ state: 'visible', timeout: 5_000 });
+    await gammaEdit.locator('[data-newproject] input[name="newProject"]').fill(tempProject);
+    await gammaEdit.locator('button[type="submit"]').click();
+    await gammaEdit.waitFor({ state: 'detached', timeout: 5_000 });
+    await page.waitForFunction(({ title, project: proj }) => {
+      const row = [...document.querySelectorAll('article.task[data-task-title]')]
+        .find((node) => node.dataset.taskTitle === title);
+      return row && new RegExp(proj).test(row.innerText);
+    }, { title: gamma, project: escapeRegex(tempProject) }, { timeout: 5_000 });
+    gammaRow = await waitForTask(page, gamma);
+    await gammaRow.dblclick();
+    gammaEdit = page.locator(`form.task[data-task-title="${attr(gamma)}"]`);
+    await gammaEdit.waitFor({ state: 'visible', timeout: 5_000 });
+    assert.equal(await gammaEdit.locator('select[name="project"]').inputValue(), tempProject, 'Edit form should preselect the saved project');
+    await gammaEdit.locator('select[name="project"]').selectOption('');
+    await gammaEdit.locator('button[type="submit"]').click();
+    await gammaEdit.waitFor({ state: 'detached', timeout: 5_000 });
+    await page.waitForFunction(({ title, project: proj }) => {
+      const row = [...document.querySelectorAll('article.task[data-task-title]')]
+        .find((node) => node.dataset.taskTitle === title);
+      return row && !new RegExp(proj).test(row.innerText);
+    }, { title: gamma, project: escapeRegex(tempProject) }, { timeout: 5_000 });
+
     log('E2E: copy and convert project');
     await clickMenu(page, project, 'COPY');
     await waitForTask(page, projectCopy);

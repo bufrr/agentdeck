@@ -98,6 +98,11 @@
 
           <form id="quick-add" class="quick-add">
             <input name="title" autocomplete="off" placeholder="Rapid Entry  -  type here and hit enter / or esc">
+            <select name="project" data-project-select aria-label="Project">
+              <option value="">Standalone</option>
+              <option value="__new__">+ New project…</option>
+            </select>
+            <span class="quick-add-newproject" data-newproject hidden><input name="newProject" autocomplete="off" placeholder="New project name"></span>
             <button type="submit">Add</button>
             <p id="add-status" hidden></p>
           </form>
