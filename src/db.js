@@ -157,7 +157,6 @@ function ensureTaskColumns(db) {
     ['parent_id', 'parent_id TEXT REFERENCES tasks(id) ON DELETE SET NULL'],
     ['list', "list TEXT NOT NULL DEFAULT 'next'"],
     ['focus', 'focus INTEGER NOT NULL DEFAULT 0'],
-    ['area', "area TEXT NOT NULL DEFAULT 'other'"],
     ['section', "section TEXT NOT NULL DEFAULT 'Tasks'"],
     ['priority', 'priority TEXT'],
     ['effort', 'effort TEXT'],
@@ -269,7 +268,6 @@ function prepareDb(file) {
       status TEXT NOT NULL DEFAULT 'TODO',
       list TEXT NOT NULL DEFAULT 'next',
       focus INTEGER NOT NULL DEFAULT 0,
-      area TEXT NOT NULL DEFAULT 'other',
       section TEXT NOT NULL DEFAULT 'Tasks',
       priority TEXT,
       effort TEXT,
@@ -325,10 +323,14 @@ function prepareDb(file) {
   `);
   ensureTaskColumns(db);
   ensureSourceColumns(db);
+  // Legacy `area` dimension removed (replaced by `project`): drop the column + index once.
+  if (db.prepare("PRAGMA table_info('tasks')").all().some((info) => info.name === 'area')) {
+    db.exec('DROP INDEX IF EXISTS idx_tasks_area;');
+    db.exec('ALTER TABLE tasks DROP COLUMN area;');
+  }
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id);
     CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
-    CREATE INDEX IF NOT EXISTS idx_tasks_area ON tasks(area);
     CREATE INDEX IF NOT EXISTS idx_tasks_closed ON tasks(closed_at);
     CREATE INDEX IF NOT EXISTS idx_tasks_trash ON tasks(trashed_at);
     CREATE INDEX IF NOT EXISTS idx_tasks_list ON tasks(list);

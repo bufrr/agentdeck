@@ -96,6 +96,27 @@ test('addTask stores an explicit project and leaves area out of the entry', asyn
   store.close();
 });
 
+test('tasks table has no area column and the drop migration is idempotent', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'gtd-db-'));
+  const currentFile = path.join(dir, 'current.org');
+  const archiveFile = path.join(dir, 'archive.org');
+  const dbFile = path.join(dir, 'gtd.sqlite');
+  await writeFile(currentFile, '* Work\n', 'utf8');
+  await writeFile(archiveFile, '', 'utf8');
+
+  const store = await createGtdStore({ currentFile, archiveFile, dbFile });
+  store.close();
+
+  const db = new DatabaseSync(dbFile);
+  const cols = db.prepare("PRAGMA table_info('tasks')").all().map((info) => info.name);
+  db.close();
+  assert.equal(cols.includes('area'), false);
+
+  // Re-opening must not throw: the migration is a no-op once area is gone.
+  const reopened = await createGtdStore({ currentFile, archiveFile, dbFile });
+  reopened.close();
+});
+
 test('SQLite store migrates old Twitter task list into source library', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'gtd-db-'));
   const currentFile = path.join(dir, 'current.org');
